@@ -1,0 +1,38 @@
+packages:
+  - 'apps/*'
+  - 'packages/*'
+
+# ---------------------------------------------------------------------------
+# 为什么用 hoisted 而不是 pnpm 默认的 isolated 布局
+#
+# 默认布局需要 pnpm 在 node_modules/.pnpm/node_modules/ 下创建大量**目录符号链接**。
+# 在本机（Windows）上这一步会被系统拒绝，报 os error 2 / os error 5，而且每次拦下的
+# 包都不一样（@types/react-dom、@babel/helpers、convert-source-map …… 每次都换），
+# 清空 node_modules、禁用沙箱重试均无效，直接导致 pnpm install 无法完成。
+#
+# 已排除的原因（都做过定向探测）：
+#   - 权限 / 沙箱：junction、文件符号链接、node_modules 下深层建目录全正常
+#   - store 损坏：清空 node_modules 后同样复现
+#   - 长路径：失败路径约 70 字符，远低于 260
+#
+# hoisted 是 npm 风格的扁平布局，不创建那层链接，因此不受影响。
+# 本项目只有 3 个工作区包、react 单版本，不存在必须靠 isolated 隔离的依赖冲突，
+# 代价可以接受。将来若真出现 peer 版本冲突，再回头排查本机的符号链接问题。
+#
+# 注意：pnpm 12 起配置只读本文件，`~/.npmrc` 与项目 .npmrc 里的同名项会被忽略
+# （可用 `pnpm config list` 验证）。
+# ---------------------------------------------------------------------------
+nodeLinker: hoisted
+
+# pnpm 12 起，依赖的 postinstall 脚本默认被阻止，必须显式放行。
+# 不放行的后果不是"少个脚本"，而是 install 直接以 ERR_PNPM_IGNORED_BUILDS 失败（exit 1）。
+#   electron —— 靠 postinstall 下载预编译二进制，不放行则 node_modules/electron 里没有 dist
+#   esbuild  —— 靠 postinstall 生成平台可执行文件
+allowBuilds:
+  electron: true
+  esbuild: true
+
+# pnpm 的供应链策略默认拒绝"刚发布不久"的版本；electron 需要显式豁免。
+minimumReleaseAgeExclude:
+  - electron@44.4.2
+  - fast-check@4.10.2

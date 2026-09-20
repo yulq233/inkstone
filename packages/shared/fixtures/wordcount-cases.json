@@ -1,0 +1,126 @@
+{
+  "$comment": [
+    "字数口径的跨语言共享用例 —— 唯一真源。",
+    "vitest（packages/shared）与 pytest（services/sidecar）都必须读这份文件并全绿。",
+    "存在的理由：口径在 TS 与 Python 里各有一份实现（前端要实时显示，后端要缓存进 meta.json），",
+    "两份实现一旦漂移，症状就是『界面显示的字数与磁盘上算出来的不一致』——用户会报『字数对不上』，",
+    "而这类 bug 从两边各自的测试里都看不出来。",
+    "",
+    "含不可见字符的用例写成 \\uXXXX 转义：JSON 原生支持，文件保持纯 ASCII，",
+    "既能 review 也不会在编辑器里被悄悄吃掉。"
+  ],
+  "cases": [
+    {
+      "id": "cn-basic",
+      "note": "中文正文 + 全角句号：句号属 Po，被『不含标点』口径排除",
+      "text": "他推开门。",
+      "withPunct": 5,
+      "withoutPunct": 4
+    },
+    {
+      "id": "latin-basic",
+      "note": "英文空格分隔：空格不计入任一口径",
+      "text": "Hello world",
+      "withPunct": 10,
+      "withoutPunct": 10
+    },
+    {
+      "id": "mixed",
+      "note": "中英混排，无标点，两口径相等",
+      "text": "中文 English 混排",
+      "withPunct": 11,
+      "withoutPunct": 11
+    },
+    {
+      "id": "ideographic-space",
+      "note": "『第一章\\u3000初入宗门』：全角空格 U+3000 是空白，不计入 —— 中文排版里它真实存在",
+      "text": "\u7b2c\u4e00\u7ae0\u3000\u521d\u5165\u5b97\u95e8",
+      "withPunct": 7,
+      "withoutPunct": 7
+    },
+    {
+      "id": "cjk-quotes",
+      "note": "『「你来了。」老人说。』：中文引号（Ps/Pe）与句号（Po）全排除，只剩 6 个汉字",
+      "text": "「你来了。」老人说。",
+      "withPunct": 10,
+      "withoutPunct": 6
+    },
+    {
+      "id": "emoji",
+      "note": "emoji 属 So（符号），计入含标点、排除于不含标点",
+      "text": "他笑🖋",
+      "withPunct": 3,
+      "withoutPunct": 2
+    },
+    {
+      "id": "surrogate-pair",
+      "note": "生僻字 U+20BB7 在 UTF-16 里是代理对；用 length 会算成 2，必须按码点迭代",
+      "text": "𠮷野家",
+      "withPunct": 3,
+      "withoutPunct": 3
+    },
+    {
+      "id": "bom-inline",
+      "note": "『甲\\u4e59\\uFEFF丙丁』：正文中间混入 BOM/ZWNBSP（从 Word 粘贴常见）。ECMAScript 把它当空白，Python isspace() 不认 —— 这是两套实现的分歧点，本用例把它钉死",
+      "text": "\u7532\u4e59\ufeff\u4e19\u4e01",
+      "withPunct": 4,
+      "withoutPunct": 4
+    },
+    {
+      "id": "nel",
+      "note": "『甲\\u0085乙』：U+0085 NEL，Python isspace() 认为是空白，ECMAScript 不认。按 ECMAScript 口径算作一个 Cc 字符（两口径都计）",
+      "text": "\u7532\u0085\u4e59",
+      "withPunct": 3,
+      "withoutPunct": 3
+    },
+    {
+      "id": "control-c1",
+      "note": "『甲\\u001C乙』：U+001C 信息分隔符，同上，Python isspace() 与 ECMAScript 在此分歧",
+      "text": "\u7532\u001c\u4e59",
+      "withPunct": 3,
+      "withoutPunct": 3
+    },
+    {
+      "id": "zwsp",
+      "note": "『甲\\u200B乙』：零宽空格 U+200B 两侧都不算空白（不是 Zs），按 Cf 计入两口径",
+      "text": "\u7532\u200b\u4e59",
+      "withPunct": 3,
+      "withoutPunct": 3
+    },
+    {
+      "id": "tab-and-newline",
+      "note": "制表与换行都是空白",
+      "text": "甲\n\t乙",
+      "withPunct": 2,
+      "withoutPunct": 2
+    },
+    {
+      "id": "empty",
+      "note": "空文本",
+      "text": "",
+      "withPunct": 0,
+      "withoutPunct": 0
+    },
+    {
+      "id": "math-and-digits",
+      "note": "『3*4=12』：乘号（Po）与等号（Sm）排除，数字保留 —— 数字乘号写法在小说里会出现",
+      "text": "3*4=12",
+      "withPunct": 6,
+      "withoutPunct": 4
+    },
+    {
+      "id": "dash-and-quotes",
+      "note": "『——「他说」』：两个破折号（Pd）与引号（Ps/Pe）全排除，只剩『他说』2 字",
+      "text": "——「他说」",
+      "withPunct": 6,
+      "withoutPunct": 2
+    },
+    {
+      "id": "digit-with-colon",
+      "note": "『第 1 章：开始』：中英数字混排 + 半角空格 + 全角冒号（Po）",
+      "text": "第 1 章：开始",
+      "withPunct": 6,
+      "withoutPunct": 5
+    }
+  ]
+}

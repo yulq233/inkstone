@@ -1,0 +1,26 @@
+{
+  "name": "@inkstone/md-adapter",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Markdown ↔ ProseMirror 适配层（正文读写的唯一入口）",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run --dir test",
+    "test:watch": "vitest --dir test",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@inkstone/shared": "workspace:*",
+    "prosemirror-model": "^1.25.11"
+  },
+  "devDependencies": {
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  }
+}

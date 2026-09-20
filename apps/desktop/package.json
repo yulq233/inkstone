@@ -1,0 +1,45 @@
+{
+  "name": "@inkstone/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "砚台桌面应用（Electron 外壳 + 渲染进程）",
+  "productName": "砚台",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "test": "vitest run --dir test"
+  },
+  "dependencies": {
+    "@inkstone/md-adapter": "workspace:*",
+    "@inkstone/shared": "workspace:*",
+    "@tiptap/core": "^3.31.3",
+    "@tiptap/extension-blockquote": "^3.31.3",
+    "@tiptap/extension-bold": "^3.31.3",
+    "@tiptap/extension-document": "^3.31.3",
+    "@tiptap/extension-heading": "^3.31.3",
+    "@tiptap/extension-history": "^3.31.3",
+    "@tiptap/extension-horizontal-rule": "^3.31.3",
+    "@tiptap/extension-italic": "^3.31.3",
+    "@tiptap/extension-paragraph": "^3.31.3",
+    "@tiptap/extension-placeholder": "^3.31.3",
+    "@tiptap/extension-text": "^3.31.3",
+    "@tiptap/pm": "^3.31.3",
+    "@tiptap/react": "^3.31.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.1",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "electron": "^44.4.2",
+    "electron-vite": "^5.0.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.1"
+  }
+}

@@ -1,0 +1,23 @@
+# 统一按 LF 存放与检出。
+#
+# 这不是"跨平台洁癖"，本项目对行尾有实际的依赖：
+#   - Markdown 适配层要做字符级往返断言（`toMd(fromMd(md)) === normalize(md)`）
+#   - 正文落盘显式用 `newline="\n"`（02 文档 §6.5）
+#   - 外部编辑器改动检测基于**原始字节**的 sha256
+#
+# 工作区里混进 CRLF，会让"同一份稿子"在 Windows 与 CI/Linux 上算出不同的哈希与
+# 不同的往返结果。本机全局 `core.autocrlf=true`，这里显式覆盖掉它。
+* text=auto eol=lf
+
+# 二进制文件不做行尾转换（否则文件会被改坏）
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf  binary
+*.zip  binary
+*.inksnap binary
