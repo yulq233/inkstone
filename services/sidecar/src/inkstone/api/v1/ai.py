@@ -35,6 +35,7 @@ from ...ai.usage import UsageLedger
 from ...storage.repo import WorkRegistry
 from .schemas import (
     AiConfigRequestIn,
+    AiExpandRequestIn,
     AiGenRequestIn,
     AiPreviewRequestIn,
     AiQuickRequestIn,
@@ -216,6 +217,59 @@ def _generation_request(body: AiGenRequestIn, *, task: str, kind: str = "") -> G
     )
 
 
+def _expand_request(body: AiExpandRequestIn) -> GenerationRequest:
+    """把 expand 请求翻译成 `GenerationRequest`。
+
+    expand 不绑章节：`chapter_id` / `prefix` / `suffix` 恒为空串，装配器
+    （`_collect` 按 `task='expand'` 分流）根本不会读它们 —— 这里只是给
+    `GenerationRequest` 补齐它字段表里必填的那几个位置。
+    """
+    return GenerationRequest(
+        task="expand",
+        work_id=body.workId,
+        chapter_id="",
+        prefix="",
+        intent=body.intent,
+        temperature=body.temperature,
+        max_tokens=body.maxTokens,
+        force=body.force,
+        entry_type=body.type,
+        slug=body.slug,
+        target=body.target,
+    )
+
+
+def _preview_generation_request(body: AiPreviewRequestIn) -> GenerationRequest:
+    """把预览请求翻译成 `GenerationRequest`，**按 task 分流**。
+
+    预览要回答"这一次真的要发什么"，所以它必须与真正生成走**同一份装配**
+    （`preview()` 内部就是调 `_assemble`）。分流判据与生成端点一致：
+    - `target` 非空 → expand（`docs/16` §2.2）；
+    - 否则带 `kind` → quick；
+    - 否则 → continue。
+    """
+    if body.target:
+        return GenerationRequest(
+            task="expand",
+            work_id=body.workId,
+            chapter_id=body.chapterId,
+            prefix=body.prefix,
+            intent=body.intent,
+            temperature=body.temperature,
+            max_tokens=body.maxTokens,
+            force=body.force,
+            entry_type=body.type,
+            slug=body.slug,
+            target=body.target,
+        )
+    return _generation_request(
+        body,
+        # 与 `/ai/quick` 的分流保持同一判据：带 `kind` 就是快捷生成。
+        task="quick" if body.kind else "continue",
+        kind=body.kind,
+    )
+
+
 async def _sse_response(request: Request, gen: GenerationRequest) -> StreamingResponse:
     """先跑完 `prepare()`（失败 → 正常的 HTTP 错误），再交出响应体。
 
@@ -250,6 +304,18 @@ async def quick_generate(body: AiQuickRequestIn, request: Request) -> StreamingR
     return await _sse_response(request, _generation_request(body, task="quick", kind=body.kind))
 
 
+@router.post("/ai/expand")
+async def expand_setting(body: AiExpandRequestIn, request: Request) -> StreamingResponse:
+    """AI 扩充设定（`docs/16` D-1）：给一条 codex 条目生成 summary / body。
+
+    与续写/快捷共用 `GenerationService.prepare/events`（生成与流式那半完全一致），
+    差别只在装配源（条目现值 + 关联条目 + 总纲，见 `context._collect_expand`）与
+    prompt 模板（`expand.toml`）。产物是"候选设定文本"，写回 codex 由渲染进程
+    在采纳时走 `PUT /codex/{type}/{slug}`（本地写盘，不再发确认、不占并发）。
+    """
+    return await _sse_response(request, _expand_request(body))
+
+
 @router.post("/ai/preview")
 async def preview_context(body: AiPreviewRequestIn, request: Request) -> dict[str, object]:
     """「**将发送什么**」（`docs/11` §6.4 / §6.7）—— 装配一遍，**一个字节都不发**。
@@ -275,12 +341,7 @@ async def preview_context(body: AiPreviewRequestIn, request: Request) -> dict[st
     与点下生成时的文案逐字相同 —— 预览**不是**另一条错误来源。
     """
     outcome = await _service(request).preview(
-        _generation_request(
-            body,
-            # 与 `/ai/quick` 的分流保持同一判据：带 `kind` 就是快捷生成。
-            task="quick" if body.kind else "continue",
-            kind=body.kind,
-        )
+        _preview_generation_request(body)
     )
     bundle = outcome.bundle
     return {

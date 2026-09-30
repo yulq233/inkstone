@@ -46,9 +46,15 @@ class FakeWorkspace:
         chapters: dict[str, str],
         *,
         settings_md: str | None = None,
+        codex_entries: dict[tuple[str, str], dict] | None = None,
+        relation_summaries: list[str] | None = None,
+        general_outline: str = "",
     ) -> None:
         self._paths = WorkPaths(root)
         self._chapters = dict(chapters)
+        self._codex = dict(codex_entries or {})
+        self._relation_summaries = list(relation_summaries or [])
+        self._general_outline = general_outline
         root.mkdir(parents=True, exist_ok=True)
         if settings_md is not None:
             self._paths.settings_md.write_text(settings_md, encoding="utf-8")
@@ -62,6 +68,20 @@ class FakeWorkspace:
 
     async def read_chapter(self, work_id: str, chapter_id: str) -> str:
         return self._chapters[chapter_id]
+
+    # ---- expand 专用（docs/16 D-5）----
+
+    async def read_codex_entry(self, work_id: str, entry_type: str, slug: str) -> dict:
+        return self._codex.get((entry_type, slug), {})
+
+    async def codex_relation_summaries(self, work_id: str, entry: dict) -> list[str]:
+        # 假实现：直接回预置的关联 summary（由用例配置），
+        # 不模拟"按 relation.to 去 codex 里查"——那属于 RegistryWorkspace 的职责，
+        # 在 test 里由 HTTP 用例覆盖。
+        return list(self._relation_summaries)
+
+    async def read_general_outline(self, work_id: str) -> str:
+        return self._general_outline
 
 
 def _make(

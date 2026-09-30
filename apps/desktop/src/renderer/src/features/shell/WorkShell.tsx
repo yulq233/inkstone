@@ -363,7 +363,17 @@ export function WorkShell() {
       </header>
 
       <div className="work-body">
-        <aside className="work-sidebar sidebar-host">
+        {/* `sidebar-wide`：设定 tab 的表单（名字/别名/标签/梗概/属性/描述 + AI 候选全文）
+            比清单重得多，240px 是物理上装不下的（真机反馈"三根滚动条太丑"的根因之一）。
+            只给**设定**加宽，是因为章节/大纲的内容本来就窄，跟着加宽只会让正文无谓变窄。
+            宽度规则在 global.css 的 `.sidebar-wide`。 */}
+        <aside
+          className={
+            sidebarTab === 'codex'
+              ? 'work-sidebar sidebar-host sidebar-wide'
+              : 'work-sidebar sidebar-host'
+          }
+        >
           <div className="sidebar-tabs" role="tablist">
             <button
               type="button"
@@ -405,7 +415,12 @@ export function WorkShell() {
             />
           </div>
           <div className={sidebarTab === 'codex' ? 'sidebar-pane' : 'sidebar-pane hidden'}>
-            <CodexSidebarPane key={workId ?? 'no-work'} client={client} workId={workId} />
+            <CodexSidebarPane
+              key={workId ?? 'no-work'}
+              client={client}
+              workId={workId}
+              checkEgress={gate.check}
+            />
           </div>
           <div className={sidebarTab === 'outline' ? 'sidebar-pane' : 'sidebar-pane hidden'}>
             <OutlineSidebarPane

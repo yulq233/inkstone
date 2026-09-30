@@ -76,6 +76,10 @@ class GenerationRequest:
     max_tokens: int | None = None
     force: bool = False
     kind: str = ""
+    #: expand 专用（docs/16 D-4/D-5）：目标条目类型/slug 与产物目标（summary/body）。
+    entry_type: str = ""
+    slug: str = ""
+    target: str = ""
 
 
 @dataclass(slots=True)
@@ -142,7 +146,14 @@ class GenerationService:
     # ------------------------------------------------------------------
 
     async def prepare(self, req: GenerationRequest, *, trace_id: str = "") -> PreparedGeneration:
-        busy_key = f"{req.work_id}:{req.chapter_id}"
+        # expand 不绑章节，绑**条目**（docs/16 D-4）：同一张卡同时只跑一次扩充。
+        # 键形如 `<workId>:expand:<type>:<slug>`，与续写的 `<workId>:<chapterId>`
+        # 天然不冲突，放同一个 busy 表即可。chapter_id 对 expand 无意义，恒为空串。
+        busy_key = (
+            f"{req.work_id}:expand:{req.entry_type}:{req.slug}"
+            if req.task == "expand"
+            else f"{req.work_id}:{req.chapter_id}"
+        )
         if busy_key in self._busy:
             raise AiBusy()
         self._busy.add(busy_key)
@@ -174,7 +185,11 @@ class GenerationService:
             bundle=bundle,
             temperature=bundle.temperature if req.temperature is None else req.temperature,
             max_tokens=DEFAULT_MAX_TOKENS if req.max_tokens is None else req.max_tokens,
-            target_ref=f"chapter:{req.chapter_id}",
+            target_ref=(
+                f"codex:{req.entry_type}:{req.slug}"
+                if req.task == "expand"
+                else f"chapter:{req.chapter_id}"
+            ),
             store=RunStore(self._registry.work_paths(req.work_id)),
             trace_id=trace_id,
         )
@@ -199,6 +214,9 @@ class GenerationService:
                     self._state.style_card if req.style_card is None else req.style_card
                 ),
                 kind=req.kind,
+                entry_type=req.entry_type,
+                slug=req.slug,
+                target=req.target,
             )
         )
 

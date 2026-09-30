@@ -675,13 +675,20 @@ textarea {
   display: flex;
 }
 
+/* 侧栏自己**不滚**：它是「固定 tab 条 + 一块可滚动内容」的两段结构。
+   原来写 `overflow: auto` + 子级 `.sidebar-pane { height: 100% }` 是自相矛盾的组合 ——
+   100% 算的是整个侧栏高度，再加 tab 条必然溢出，于是外层先冒一根滚动条、
+   内层面板再冒一根（`codex.css` 的 `.codex-panel` / `.outline-panel` 都声明了 overflow）。
+   改成 flex 列 + `overflow: hidden`，让滚动只在内容面板那一层发生。 */
 .work-sidebar {
   flex: none;
   width: 240px;
   padding: 14px 16px;
   border-right: 1px solid var(--border);
   background: var(--surface-2);
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 
 .work-content {
@@ -689,6 +696,22 @@ textarea {
   min-width: 0;
   padding: 14px 16px;
   overflow: auto;
+}
+
+/* 设定 tab 独占一个更宽的列：它的内容是一整张表单（名字/别名/标签/梗概/属性/描述）
+   外加 AI 候选全文，240px 装不下 —— 真机反馈的"一列塞三层滚动条"就是这个装不下的结果。
+   只加宽**设定**：章节列表与章纲本来就窄，跟着加宽只会白白吃掉正文。
+   选择器写成三个类（0,3,0）以稳压 `.work-sidebar`（0,1,0）与 `.work-sidebar.sidebar-host`（0,2,0）。 */
+.work-sidebar.sidebar-host.sidebar-wide {
+  width: 400px;
+}
+
+/* 窗口最小可拖到 900px：这时 400px 的侧栏会把正文压到 42em 度量（--editor-measure）以下太多，
+   退让一档。断点取 1040 = 900 窗口 + 一点余量，避免刚过最小宽度就触发。 */
+@media (max-width: 1040px) {
+  .work-sidebar.sidebar-host.sidebar-wide {
+    width: 320px;
+  }
 }
 
 .slot-title {

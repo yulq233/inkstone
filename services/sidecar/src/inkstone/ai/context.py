@@ -41,7 +41,7 @@ import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from ..domain.paths import WorkPaths
 from ..errors import AiContextTooLong
@@ -57,6 +57,13 @@ ADJACENT_TAIL_CHARS = 300
 ADJACENT_HEAD_CHARS = 300
 SETTINGS_MD_CHARS = 2_000
 STYLE_CARD_CHARS = 800
+# expand（docs/16 D-5）专用：目标条目 body 只取**尾**若干字（用户最近补的描述最相关）。
+EXPAND_BODY_TAIL_CHARS = 600
+#: 关联条目 summary 单条上限与总条数上限（docs/16 D-5）。
+EXPAND_RELATION_SUMMARY_CHARS = 120
+EXPAND_RELATION_MAX_ITEMS = 10
+#: 总纲只取**头**若干字（世界观、主题、整体基调都在开头）。
+EXPAND_GENERAL_HEAD_CHARS = 1_500
 
 # ---- 预算（**兜底**）----
 #: 假设的上下文窗口。取 8192 这个**下限**值：拉不到模型的真实窗口，就按最小的算。
@@ -78,6 +85,28 @@ SLOT_SOURCE: dict[str, str] = {
     "prefix": "L4",
     "suffix": "L4",
     "adjacent": "L3",
+    # expand 的三块来源（docs/16 D-5）：条目现值 / 关联条目 / 总纲。
+    "entry": "L0",
+    "relations": "L0",
+    "general_outline": "manual",
+}
+
+#: expand 的 `type` → 中文名（docs/16 D-6：模板里用 `{entry_type}` 变量换措辞）。
+#: 键与 `domain/codex.py` 的 `CODEX_TYPES` 一一对应；未知值回落成"设定"，
+#: 装配不因为一个拼错的 type 就失败 —— 它本来就在模板里只是个措辞变量。
+ENTRY_TYPE_LABELS: dict[str, str] = {
+    "character": "人物",
+    "location": "地点",
+    "faction": "势力",
+    "item": "物品",
+    "concept": "概念",
+}
+
+#: expand 的 `target` → 中文名。``summary`` = 核心梗概（进 L0 精选），
+#: ``body`` = 完整描述（进正文草稿区）。未知值回落成"描述"，理由同上。
+TARGET_LABELS: dict[str, str] = {
+    "summary": "梗概",
+    "body": "描述",
 }
 
 
@@ -150,6 +179,11 @@ class AssembleRequest:
     style_card: str = ""
     #: ``quick`` 的子类型（naming / dialogue / …）。
     kind: str = ""
+    #: expand 专用（docs/16 D-5）：目标条目类型与 slug，以及产物目标。
+    #: ``target`` 只可能是 ``summary`` / ``body``，其余任务用不到、保持默认空串。
+    entry_type: str = ""
+    slug: str = ""
+    target: str = ""
 
 
 class Workspace(Protocol):
@@ -164,6 +198,18 @@ class Workspace(Protocol):
     async def chapter_ids(self, work_id: str) -> list[str]: ...
 
     async def read_chapter(self, work_id: str, chapter_id: str) -> str: ...
+
+    # ---- expand 专用（docs/16 D-5）。续写路径不用，但放在同一协议里以便
+    # ---- 测试用一个假 Workspace 把"哪些块、丢哪个"穷举干净。
+    async def read_codex_entry(
+        self, work_id: str, entry_type: str, slug: str
+    ) -> dict[str, Any]: ...
+
+    async def codex_relation_summaries(
+        self, work_id: str, entry: dict[str, Any]
+    ) -> list[str]: ...
+
+    async def read_general_outline(self, work_id: str) -> str: ...
 
 
 def plan_blocks(budget: int, blocks: Sequence[Block]) -> tuple[list[Block], list[Drop]]:
@@ -274,6 +320,11 @@ class Assembler:
         顺序刻意与模板里的呈现顺序不同：呈现顺序要顺着读（设定在前、前文在后），
         而**丢块顺序**要按重要性 —— 先丢相邻章，最后才动前文。
         """
+        if req.task == "expand":
+            # expand 的装配源与续写完全不同（docs/16 D-1/D-2）：读 codex 条目 +
+            # 关联条目 + 总纲，不碰光标前后文与相邻章。形状仍是同一批 Block。
+            return await self._collect_expand(req)
+
         paths = self._workspace.paths(req.work_id)
         chapter_ids = await self._workspace.chapter_ids(req.work_id)
 
@@ -333,10 +384,122 @@ class Assembler:
 
         return "\n".join(part for part in parts if part.strip() != "")
 
+    # ------------------------------------------------------------------
+    # expand 装配（docs/16 D-5）
+    # ------------------------------------------------------------------
+
+    async def _collect_expand(self, req: AssembleRequest) -> list[Block]:
+        """expand 的装配源。**不碰**光标前后文、相邻章与「设定.md」——
+        那几样对"扩充一条设定"没有用，塞进去只会白占预算（docs/16 D-1）。
+
+        三块来源（先限源、再兜底，与续写同一条纪律）：
+        1. 目标条目现值（summary + fields + body 尾若干字）—— 这是"给 AI 看的草稿"；
+        2. 关联条目 summary（`relations` 指到的那些卡，各取一行）；
+        3. 总纲开头（世界观描述尤其要用整体基调）。
+
+        ``target=summary`` 与 ``target=body`` 的装配**源完全一样**，差别只在
+        prompt 指令（`expand.toml` 按 target 换措辞）—— 两者都要看"这条卡
+        现在写了什么"才能扩出对味的东西。
+        """
+        entry = await self._workspace.read_codex_entry(req.work_id, req.entry_type, req.slug)
+
+        entry_text = _render_entry(entry)
+        relations_text = await self._relations_text(req, entry)
+        general_text = _cap(
+            (await self._workspace.read_general_outline(req.work_id)).strip(),
+            EXPAND_GENERAL_HEAD_CHARS,
+        )
+
+        # 优先级：条目现值最该保住（丢了就等于让 AI 瞎编），关联条目其次，总纲最次。
+        blocks: list[Block] = []
+        if entry_text.strip():
+            blocks.append(
+                Block(
+                    slot="entry",
+                    title="当前设定条目",
+                    text=entry_text,
+                    trim="head",
+                )
+            )
+        if relations_text.strip():
+            blocks.append(
+                Block(
+                    slot="relations",
+                    title="关联条目",
+                    text=relations_text,
+                    trim="head",
+                )
+            )
+        if general_text.strip():
+            blocks.append(
+                Block(
+                    slot="general_outline",
+                    title="作品总纲",
+                    text=general_text,
+                    trim="head",
+                )
+            )
+        return blocks
+
+    async def _relations_text(self, req: AssembleRequest, entry: dict[str, Any]) -> str:
+        """把目标条目的 `relations` 翻译成"一行一个关联条目 summary"。
+
+        每条 summary 截到 120 字、最多 10 条（docs/16 D-5）。断链（指向的 slug
+        已不存在）由适配层静默跳过 —— 装配不该因为一条断链就失败。
+        """
+        summaries = await self._workspace.codex_relation_summaries(req.work_id, entry)
+        lines: list[str] = []
+        for summary in summaries[:EXPAND_RELATION_MAX_ITEMS]:
+            text = _cap(summary.strip(), EXPAND_RELATION_SUMMARY_CHARS)
+            if text:
+                lines.append(text)
+        return "\n".join(lines)
+
 
 # ---------------------------------------------------------------------------
 # 渲染
 # ---------------------------------------------------------------------------
+
+
+def _render_entry(entry: dict[str, Any]) -> str:
+    """把一条 codex 条目渲染成给模型看的一段文本（expand 装配源第 1 块）。
+
+    刻意只取"人设最该被 AI 看见"的字段：name + summary + fields（键值逐行）+
+    body 尾若干字。aliases/tags/relations 不进 —— aliases 是别称列表、tags 是
+    标签，对"扩出对味的小传"帮助不大，塞进去只会占预算；relations 单独一块。
+    """
+    parts: list[str] = []
+    name = str(entry.get("name", "")).strip()
+    if name:
+        parts.append(f"【{name}】")
+
+    summary = str(entry.get("summary", "")).strip()
+    if summary:
+        parts.append(f"梗概：{summary}")
+
+    fields = entry.get("fields") or {}
+    if isinstance(fields, dict) and fields:
+        for key, value in fields.items():
+            parts.append(f"{key}：{_format_field_value(value)}")
+
+    body = str(entry.get("body", "")).strip()
+    if body:
+        parts.append(f"描述：{_cap_tail(body, EXPAND_BODY_TAIL_CHARS)}")
+
+    return "\n".join(parts)
+
+
+def _format_field_value(value: object) -> str:
+    """把 fields 的一个标量 / 列表 / 字典值压成一行字。
+
+    值在领域层已被约束为 `标量 | 标量列表 | 标量字典`（`domain/codex.py`），
+    这里只是把它变成可读文本；列表用顿号连接、字典用 `key=value` 连接。
+    """
+    if isinstance(value, list):
+        return "、".join(str(item) for item in value)
+    if isinstance(value, dict):
+        return "，".join(f"{k}={v}" for k, v in value.items())
+    return str(value)
 
 
 def _render_system(template: PromptTemplate, style_card: str, req: AssembleRequest) -> str:
@@ -367,6 +530,14 @@ def _render_user(
                 "快捷生成的 kind 没有对应的指令",
                 extra={"extra_fields": {"kind": req.kind}},
             )
+    elif req.task == "expand":
+        # expand 的"这次要扩什么"写进模板里的 {target} / {entry_type} 变量，
+        # 不是 kinds 表 —— 它与 quick 不同：只有一种动作，措辞随 target/type 换。
+        # 这里为未知值兜底一个可读中文，避免模板里残留一个 {target} 字面量。
+        entry_type = ENTRY_TYPE_LABELS.get(req.entry_type, "设定")
+        target = TARGET_LABELS.get(req.target, "描述")
+        # 这两个变量直接交给 render，模板里写 {entry_type} / {target}。
+        return _render_expand_user(template, by_slot, req, entry_type, target)
 
     values = {
         "settings": slot("settings"),
@@ -375,6 +546,30 @@ def _render_user(
         "adjacent": slot("adjacent"),
         "intent": req.intent.strip() or "（无）",
         "instruction": instruction,
+    }
+    return render(template.user, values).strip()
+
+
+def _render_expand_user(
+    template: PromptTemplate,
+    by_slot: dict[str, Block],
+    req: AssembleRequest,
+    entry_type_label: str,
+    target_label: str,
+) -> str:
+    def slot(name: str, empty: str = "（无）") -> str:
+        block = by_slot.get(name)
+        if block is None or block.text.strip() == "":
+            return empty
+        return block.text
+
+    values = {
+        "entry": slot("entry"),
+        "relations": slot("relations"),
+        "general_outline": slot("general_outline"),
+        "intent": req.intent.strip() or "（无）",
+        "entry_type": entry_type_label,
+        "target": target_label,
     }
     return render(template.user, values).strip()
 

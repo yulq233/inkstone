@@ -19,6 +19,14 @@
  * 各写一份的结果是"界面里是 A 地址、实际请求发给 B 地址"这种只在特定供应商上复现的怪问题。
  */
 
+/**
+ * ⚠️ 这是一条 **type-only** import，方向是 ai-types → api-types，而 api-types 也
+ * type-only import 了本文件 —— 类型层存在一个环。这是**刻意**的：`CodexType` 是
+ * 设定条目的真源（在 api-types），expand 请求又要引用它；为一个类型标注把定义搬来搬去
+ * 只会让"它到底住在哪"更难查。`import type` 编译后被完全擦除，**不产生运行时循环**。
+ */
+import type { CodexType } from './api-types';
+
 /** 上游协议类型。v1 只有两种（`docs/11` §3.4）。 */
 export type ProviderKind = 'openai-compatible' | 'ollama';
 
@@ -407,6 +415,45 @@ export interface AiGenRequest {
 export interface AiPreviewRequest extends AiGenRequest {
   /** 快捷生成的子类型（`AI_QUICK_KINDS`）。留空 = 续写。 */
   kind?: AiQuickKind;
+  /**
+   * expand 预览的三个可选字段（`docs/16` §2.2）。三者与 `kind` **互斥**：
+   * `target` 非空即按 expand 装配（sidecar 的 `_preview_generation_request` 这么分流）。
+   * expand 不绑章节，`chapterId` / `prefix` 在预览请求里留空即可。
+   */
+  type?: CodexType;
+  slug?: string;
+  target?: AiExpandTarget;
+}
+
+/**
+ * AI 扩充设定的产物目标（`docs/16` D-6）。
+ *
+ * - `summary` —— 50~100 字核心梗概（写回条目 `summary`，进记忆金字塔 L0 精选）；
+ * - `body` —— 完整小传 / 背景 / 世界观描述（**追加**到条目 `body`，见 D-7）。
+ */
+export type AiExpandTarget = 'summary' | 'body';
+
+/**
+ * 扩充设定的请求（`POST /ai/expand`，`docs/16` D-1）。
+ *
+ * **刻意不复用 `AiGenRequest`**：expand 不绑章节，没有 `prefix` / `suffix`，
+ * 它的输入是"目标条目 + 产物目标"。让渲染进程去编一个假 `chapterId` 正是契约漂移。
+ * 与 sidecar 的 `AiExpandRequestIn` 一一对应。
+ */
+export interface AiExpandRequest {
+  workId: string;
+  /** 目标条目的类型（决定磁盘目录，也决定 prompt 里的措辞）。 */
+  type: CodexType;
+  /** 目标条目的 slug（文件名）。 */
+  slug: string;
+  target: AiExpandTarget;
+  /** 用户给的"从哪个方向扩"的补充说明（"多写他早年的师门经历"）。 */
+  intent?: string;
+  /** 覆盖模板里的 temperature。 */
+  temperature?: number;
+  maxTokens?: number;
+  /** 忽略单日预算拦截（与 `AiGenRequest.force` 同义）。 */
+  force?: boolean;
 }
 
 /**

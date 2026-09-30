@@ -252,6 +252,29 @@ class AiQuickRequestIn(AiGenRequestIn):
     kind: str = Field(min_length=1)
 
 
+class AiExpandRequestIn(_Request):
+    """`POST /ai/expand` 的请求体 —— 「AI 扩充设定」（`docs/16` D-1）。
+
+    **刻意不继承 `AiGenRequestIn`**：expand 不绑章节，没有 prefix/suffix，
+    它的输入是"目标条目 + 产物目标"，语义与续写/快捷完全不同。继承会让
+    `chapterId` / `prefix` 变成必填，而 expand 根本用不到它们 ——
+    强迫渲染进程去编一个假 chapterId 正是契约漂移的开始。
+
+    ``type`` 用 `Literal`（`domain/codex.py` 的 `CODEX_TYPES`）：这里不是
+    "加一种快捷生成不该改代码"的宽松场景，type 决定磁盘目录，拼错就该响亮地 400，
+    而不是落到装配时读一个不存在的目录。``target`` 只有两态，同样用 Literal。
+    """
+
+    workId: str = Field(min_length=1)
+    type: Literal["character", "location", "faction", "item", "concept"]
+    slug: str = Field(min_length=1, max_length=200)
+    target: Literal["summary", "body"]
+    intent: str = ""
+    temperature: float | None = Field(default=None, ge=0, le=2)
+    maxTokens: int | None = Field(default=None, ge=1, le=32_768)
+    force: bool = False
+
+
 class AiPreviewRequestIn(AiGenRequestIn):
     """`POST /ai/preview` 的请求体 —— 「**将发送什么**」（`docs/11` §6.4 / §6.7）。
 
@@ -263,9 +286,27 @@ class AiPreviewRequestIn(AiGenRequestIn):
     `kind` 与 `AiQuickRequestIn` 不同，**允许为空串**（= 续写）：
     这里只是一个"按哪种模板装"的开关，认不出时 `_render_user` 会渲染出空指令
     并留一条日志 —— 预览的用途是"看一眼"，不该因为 kind 拼错就整个端点 400。
+
+    `type` / `slug` / `target` 是 expand 预览的**可选**字段（`docs/16` §2.2）：
+    三者都非空时按 expand 装配，否则走续写/快捷。它们与 `AiGenRequestIn` 的
+    `chapterId` / `prefix` 并存（那些字段 expand 用不到、保持默认即可）——
+    预览端点用同一个请求体覆盖三种 task，比拆三个端点少一处漂移。
+
+    `chapterId` 在这里**允许空串**（override 掉父类 `min_length=1`）：expand 的
+    预览没有章节，传空串是正常态而非参数错误。续写/快捷的预览仍会传真实
+    chapterId，不受影响 —— 预览的"一次要看什么"由 `target` / `kind` 分流，
+    chapterId 只是续写那条装配要用的输入。
+
+    `prefix` 同样 override 出默认空串（父类是必填）：expand 预览没有"光标前文"，
+    不给它是正常态。续写预览传了真实 prefix 不受影响。
     """
 
+    chapterId: str = ""
+    prefix: str = ""
     kind: str = ""
+    type: str = ""
+    slug: str = ""
+    target: str = ""
 
 
 class AiRunFeedbackIn(_Request):

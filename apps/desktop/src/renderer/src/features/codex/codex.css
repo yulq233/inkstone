@@ -30,11 +30,13 @@
   border-bottom-color: var(--accent);
 }
 
-/* 两个 tab 内容常挂载，用 CSS 隐藏（不卸载，保章节列表滚动位置/选中态） */
+/* 两个 tab 内容常挂载，用 CSS 隐藏（不卸载，保章节列表滚动位置/选中态）。
+   `flex: 1` 而不是 `height: 100%`：父级 `.work-sidebar` 里还有一条 `flex: none` 的 tab 条，
+   面板只该吃**剩下**的高度。写 100% 会连 tab 条一起超出去（见 global.css 的注释）。 */
 .sidebar-pane {
   display: flex;
   flex-direction: column;
-  height: 100%;
+  flex: 1;
   min-height: 0;
 }
 
@@ -42,11 +44,16 @@
   display: none;
 }
 
+/* 设定侧栏里**唯一**的滚动容器：撑满剩余高度、内容自己滚。
+   之前它没有 `flex: 1`，高度不受约束 → 内容撑破 `.sidebar-pane` → 外层 `.work-sidebar`
+   再滚一次，同一段内容上出现两根滚动条。 */
 .codex-panel {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 8px 12px;
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
 }
 
@@ -95,6 +102,38 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+
+/* 类型分节（真机反馈：平铺一长列难找条目）。节头 = 类型名 + 计数 + 撑满的分隔线 */
+.codex-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.codex-group-label {
+  font-size: 0.85em;
+  font-weight: 500;
+}
+
+.codex-group-count {
+  font-size: 0.8em;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+}
+
+.codex-group-head::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
 }
 
 .codex-list-item {
@@ -238,3 +277,186 @@
   color: var(--muted, var(--fg));
   opacity: 0.7;
 }
+
+/* ---------------------------------------------------------------------------
+   AI 刻画（docs/16 M4-P1）
+
+   同样只用 global.css 的主题变量。⚠️ 用 `--text` / `--text-muted` / `--text-faint`，
+   不用本文件历史遗留的 `var(--fg)` / `var(--muted)` —— 那两个变量**从未定义**，
+   声明会被整条丢弃（见文件末尾的待办注释）。
+--------------------------------------------------------------------------- */
+
+/* 编辑页里的「AI 刻画」区：两个动作按钮 + 候选面板 */
+.codex-expand {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.codex-expand-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.codex-expand-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.codex-expand-actions button {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.codex-expand-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* 「有未保存改动」的提示（docs/16 §9）。
+   刻意**不用**错误色：它解释的是"按下去会先保存"（一条正常的行为说明），
+   而不是"你哪里做错了"——用红色会让人以为功能坏了。 */
+.codex-expand-hint {
+  margin: 0;
+  font-size: 0.85em;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
+.codex-expand-hint strong {
+  color: var(--text);
+}
+
+/* 候选面板：就地卡片（非模态，见 SettingCandidatePanel 文件头）。
+   边框用 accent 让它从一排编辑字段里"跳出来"——它是本次操作的焦点 */
+.codex-candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.codex-candidate-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.codex-candidate-title {
+  font-weight: 600;
+}
+
+.codex-candidate-model {
+  font-size: 0.8em;
+  color: var(--text-faint);
+}
+
+.codex-candidate-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.codex-candidate-error {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: var(--danger);
+}
+
+.codex-candidate-text {
+  margin: 0;
+  padding: 8px;
+  /* 不给 `max-height`、也不自滚（原来是 240px + overflow-y:auto）。
+     候选是要「通读后再采纳」的，再套一个小窗口等于让人在巴掌大的格子里读三千字，
+     而且立刻多出一根滚动条。让它跟随 `.codex-panel` 一起滚。 */
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  /* 候选是**正文**（要写进设定文件），所以用界面正文字体而不是等宽字体 */
+  font-family: inherit;
+  font-size: 0.92em;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.codex-candidate-meta {
+  font-size: 0.85em;
+}
+
+.codex-candidate-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.codex-candidate-actions button {
+  flex: 1;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* `.primary` 不是全局类（别处都是 `.xxx-actions button.primary` 这种限定写法），
+   所以要在这里自己限定一份，否则「采纳」按钮拿不到强调色 */
+.codex-candidate-actions button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg);
+}
+
+.codex-candidate-actions button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* AI 追加段落的删改列表（D-7）：一行一次生成 + 「删除该次」 */
+.codex-ai-segments {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-ai-segment {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+}
+
+.codex-ai-segment-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.85em;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ⚠️ 待办（不在 M4-P1 范围）：本文件上方多处 `color: var(--fg)` /
+   `var(--muted, var(--fg))` 引用的是**从未定义**的变量（真源是
+   `--text` / `--text-muted`），声明会被整条丢弃、颜色退化成继承。
+   与 `--radius-sm`（见 ai-panel.css 注释）同一类历史遗留，需要单独一次
+   真机核对再统一修，不在这里顺手改。 */

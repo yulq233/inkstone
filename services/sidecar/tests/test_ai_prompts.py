@@ -32,7 +32,7 @@ _TRAVERSAL_IDS = [
 
 def test_known_templates_still_load() -> None:
     """形状白名单不能把合法 id 一起挡掉。"""
-    for template_id in ("continue", "quick"):
+    for template_id in ("continue", "quick", "expand"):
         assert load_template(template_id).id == template_id
 
 

@@ -8,12 +8,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   brokenRelationText,
+  CODEX_TYPE_ORDER,
+  CODEX_TYPE_PLACEHOLDERS,
   entryToUpdateRequest,
   fieldsToRows,
+  groupByType,
+  isEntryDirty,
   joinList,
   rowsToFields,
   sortCodexList,
   splitList,
+  type EntryFormValues,
 } from '../src/renderer/src/features/codex/codex-model';
 import { generateName, generateNames } from '../src/renderer/src/features/codex/name-generator';
 import type { CodexEntrySummary } from '@inkstone/shared';
@@ -48,6 +53,49 @@ describe('sortCodexList', () => {
     const before = items.map((i) => i.name);
     sortCodexList(items);
     expect(items.map((i) => i.name)).toEqual(before);
+  });
+});
+
+describe('groupByType', () => {
+  it('按固定类型序分节，空节不出现', () => {
+    const groups = groupByType([
+      summary({ type: 'faction', name: '云京司' }),
+      summary({ type: 'character', name: '沈观澜' }),
+    ]);
+    expect(groups.map((g) => g.type)).toEqual(['character', 'faction']);
+    expect(groups[0].label).toBe('人物');
+    expect(groups[0].entries).toHaveLength(1);
+  });
+
+  it('同类型条目聚在一节、保持入参顺序（先 sortCodexList 再分组即名字序）', () => {
+    const sorted = sortCodexList([
+      summary({ name: '王五' }),
+      summary({ name: '沈观澜' }),
+      summary({ type: 'location', name: '云京' }),
+    ]);
+    const groups = groupByType(sorted);
+    expect(groups).toHaveLength(2);
+    expect(groups[0].entries.map((e) => e.name)).toEqual(['沈观澜', '王五']);
+  });
+
+  it('空清单返回空数组（无空节）', () => {
+    expect(groupByType([])).toEqual([]);
+  });
+});
+
+describe('CODEX_TYPE_PLACEHOLDERS', () => {
+  it('5 个类型都有全套示例文案（名字/别名/标签）', () => {
+    for (const type of CODEX_TYPE_ORDER) {
+      const ph = CODEX_TYPE_PLACEHOLDERS[type];
+      expect(ph.name).toMatch(/^例如：/);
+      expect(ph.aliases).toMatch(/^例如：/);
+      expect(ph.tags).toMatch(/^例如：/);
+    }
+  });
+
+  it('地点的示例不是人物的（回归：点「+地点」曾显示「沈观澜」）', () => {
+    expect(CODEX_TYPE_PLACEHOLDERS.location.name).not.toContain('沈观澜');
+    expect(CODEX_TYPE_PLACEHOLDERS.character.name).toContain('沈观澜');
   });
 });
 
@@ -153,5 +201,76 @@ describe('name-generator', () => {
     const names = generateNames(5).map((c) => c.name);
     expect(names.length).toBe(5);
     expect(new Set(names).size).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// isEntryDirty（真机发现：AI 装配读磁盘，编辑页的表单是本地态 → 不拦就会用旧值生成）
+// ---------------------------------------------------------------------------
+
+/** 磁盘上的那份（只需要 isEntryDirty 会读的 6 个字段）。 */
+function saved(overrides: Partial<EntryFormValues> = {}): EntryFormValues {
+  return {
+    name: '沈观澜',
+    aliases: ['观澜'],
+    tags: ['男主'],
+    summary: '性格直爽',
+    body: '人物是正面的',
+    fields: {},
+    ...overrides,
+  };
+}
+
+/** 表单里归一化之后的值（调用方负责 trim / splitList）。 */
+function form(overrides: Partial<EntryFormValues> = {}): EntryFormValues {
+  return saved(overrides);
+}
+
+describe('isEntryDirty', () => {
+  it('完全一致 → 不脏', () => {
+    expect(isEntryDirty(form(), saved())).toBe(false);
+  });
+
+  it('名字改了 → 脏（真机踩到的那一条）', () => {
+    expect(isEntryDirty(form({ name: '沈念' }), saved())).toBe(true);
+  });
+
+  it('别名数组顺序变了 → 脏（顺序在编辑器里有意义，不排序）', () => {
+    const s = saved({ aliases: ['观澜', '沈先生'] });
+    expect(isEntryDirty(form({ aliases: ['沈先生', '观澜'] }), s)).toBe(true);
+  });
+
+  it('别名多一个 → 脏', () => {
+    expect(isEntryDirty(form({ aliases: ['观澜', '沈先生'] }), saved())).toBe(true);
+  });
+
+  it('标签 / 梗概 / 描述任一处不同 → 脏', () => {
+    expect(isEntryDirty(form({ tags: ['男主', '云京司'] }), saved())).toBe(true);
+    expect(isEntryDirty(form({ summary: '改过的梗概' }), saved())).toBe(true);
+    expect(isEntryDirty(form({ body: '改过的描述' }), saved())).toBe(true);
+  });
+
+  it('fields 多一个键 → 脏', () => {
+    expect(isEntryDirty(form({ fields: { 年龄: 28 } }), saved())).toBe(true);
+  });
+
+  it('fields 值改了 → 脏', () => {
+    const s = saved({ fields: { 年龄: 28 } });
+    expect(isEntryDirty(form({ fields: { 年龄: 29 } }), s)).toBe(true);
+  });
+
+  it('⚠️ fields 键序不同但内容相同 → **不脏**（稳定序列化，别把"没改"判成脏）', () => {
+    const s = saved({ fields: { 年龄: 28, 瞳色: '墨黑' } });
+    expect(isEntryDirty(form({ fields: { 瞳色: '墨黑', 年龄: 28 } }), s)).toBe(false);
+  });
+
+  it('fields 嵌套对象的键序不同 → 不脏', () => {
+    const s = saved({ fields: { 外形: { 身高: 178, 体型: '清瘦' } } });
+    expect(isEntryDirty(form({ fields: { 外形: { 体型: '清瘦', 身高: 178 } } }), s)).toBe(false);
+  });
+
+  it('fields 里列表的顺序不同 → 脏（数组是有序值，不能当集合）', () => {
+    const s = saved({ fields: { 擅长: ['剑', '棋'] } });
+    expect(isEntryDirty(form({ fields: { 擅长: ['棋', '剑'] } }), s)).toBe(true);
   });
 });

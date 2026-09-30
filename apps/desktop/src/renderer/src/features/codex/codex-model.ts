@@ -44,6 +44,41 @@ export function sortCodexList(items: CodexEntrySummary[]): CodexEntrySummary[] {
   });
 }
 
+/** 一节清单（真机反馈：平铺一长列难找条目，按类型分节展示）。 */
+export interface CodexTypeGroup {
+  type: CodexType;
+  label: string;
+  entries: CodexEntrySummary[];
+}
+
+/**
+ * 清单按类型分节。按 `CODEX_TYPE_ORDER` 固定序；**空节不返回**（还没有地点时
+ * 不显示"地点 0"）。组内顺序 = 入参顺序，所以先 `sortCodexList` 再分组，
+ * 组内自动是名字 locale 序。
+ */
+export function groupByType(items: CodexEntrySummary[]): CodexTypeGroup[] {
+  return CODEX_TYPE_ORDER.map((type) => ({
+    type,
+    label: CODEX_TYPE_LABELS[type],
+    entries: items.filter((item) => item.type === type),
+  })).filter((group) => group.entries.length > 0);
+}
+
+/**
+ * 新建表单的示例文案，按类型一套（真机反馈：点「+地点」不该看到人物的
+ * 「沈观澜」）。示例统一走「云京」化名体系（写作约定）。
+ */
+export const CODEX_TYPE_PLACEHOLDERS: Record<
+  CodexType,
+  { name: string; aliases: string; tags: string }
+> = {
+  character: { name: '例如：沈观澜', aliases: '例如：观澜，沈先生', tags: '例如：主角，云京司' },
+  location: { name: '例如：云京', aliases: '例如：京师，云京道', tags: '例如：主城，东域' },
+  faction: { name: '例如：云京司', aliases: '例如：云司，巡按院', tags: '例如：官方，江湖' },
+  item: { name: '例如：青霜剑', aliases: '例如：霜刃', tags: '例如：兵器，传承' },
+  concept: { name: '例如：淬体诀', aliases: '例如：淬体功法', tags: '例如：功法，体系' },
+};
+
 /** 字段编辑行：fields 是开放键值，编辑态用"一行一个 {key, value}"表示，落盘再还原成 dict。 */
 export interface FieldRow {
   id: number;
@@ -137,4 +172,67 @@ export function splitList(text: string): string[] {
 /** 别名数组 → 逗号分隔文本（编辑态显示）。 */
 export function joinList(items: string[]): string {
   return items.join('，');
+}
+
+/** 编辑表单的值（`isEntryDirty` 的入参；字段与 `entryToUpdateRequest` 的口径一致）。 */
+export interface EntryFormValues {
+  name: string;
+  aliases: string[];
+  tags: string[];
+  summary: string;
+  body: string;
+  fields: Record<string, unknown>;
+}
+
+/**
+ * 表单值是否与**磁盘上**的条目不同。
+ *
+ * ## 为什么需要它（真机踩出来的，`docs/16` §9）
+ *
+ * AI 装配的唯一真源是磁盘：sidecar 读 `codex/<type>/<slug>.md` 来拼 prompt。而编辑页
+ * 是本地 state、点了「保存」才 PUT。于是"改了名字没保存就点生成"会得到一个用**旧值**
+ * 写出来的候选 —— 真机表现为输入框写着「沈念」、候选里却是另一个名字，而界面上
+ * 没有任何线索能让人联想到"我忘了保存"。
+ *
+ * 界面必须自己发现这件事（才能在生成前先落盘），所以判定要抽成纯函数、单独可测。
+ *
+ * ## `fields` 必须按**键序无关**的方式比
+ *
+ * `rowsToFields` 出来的对象键序跟用户编辑顺序一致，而磁盘那份是 YAML 解析出来的、
+ * 键序可能不同。直接 `JSON.stringify` 比会把"什么都没改"判成 dirty —— 然后按钮一直
+ * 拦着不让生成，比不拦更糟。所以走 {@link stableJson}。
+ *
+ * 入参的 `form` 必须是**已归一化**的值（`name` 已 trim、`aliases`/`tags` 已 `splitList`），
+ * 否则"敲了个尾随空格"也会被判成改动。
+ */
+export function isEntryDirty(
+  form: EntryFormValues,
+  saved: Pick<CodexEntry, 'name' | 'aliases' | 'tags' | 'summary' | 'body' | 'fields'>,
+): boolean {
+  if (form.name !== saved.name) return true;
+  if (!sameStringList(form.aliases, saved.aliases)) return true;
+  if (!sameStringList(form.tags, saved.tags)) return true;
+  if (form.summary !== saved.summary) return true;
+  if (form.body !== saved.body) return true;
+  return stableJson(form.fields) !== stableJson(saved.fields);
+}
+
+/** 顺序敏感的列表比较（别名的顺序在编辑器里是有意义的，不排序）。 */
+function sameStringList(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((item, index) => item === b[index]);
+}
+
+/** 键序无关的序列化，**只用于比较**（不用于落盘）。 */
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value !== null && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    const body = Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(',');
+    return `{${body}}`;
+  }
+  // `String()` 兜住 `JSON.stringify(undefined)` 返回 undefined 的情况（保持确定性）
+  return String(JSON.stringify(value));
 }
