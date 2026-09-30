@@ -11,7 +11,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '@inkstone/shared';
 
 import { ApiError } from '../src/renderer/src/lib/api';
-import { Autosave, type AutosaveOptions, type SaveOutcome, type SaveState } from '../src/renderer/src/lib/autosave';
+import {
+  Autosave,
+  type AutosaveOptions,
+  type SaveOutcome,
+  type SaveState,
+} from '../src/renderer/src/lib/autosave';
 
 const DEBOUNCE = 500;
 const MAX_WAIT = 3_000;

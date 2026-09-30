@@ -79,7 +79,4 @@ export const DEGRADABLE_SYNTAX = [
 ] as const;
 
 /** 全部允许的节点与标记名，供"编辑器扩展集 == 白名单"的一致性检查使用 */
-export const INKSTONE_ALLOWED_NAMES = [
-  ...ALLOWED_BLOCK_NODES,
-  ...ALLOWED_MARK_NAMES,
-] as const;
+export const INKSTONE_ALLOWED_NAMES = [...ALLOWED_BLOCK_NODES, ...ALLOWED_MARK_NAMES] as const;

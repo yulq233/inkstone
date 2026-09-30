@@ -8,6 +8,7 @@
  *   A5  /api/v1/healthz 免鉴权可达；受保护端点无 token 返回 401
  *   A6  POST /api/v1/shutdown 能让进程优雅退出（退出码 0）
  *   A9  stdout / stderr / 日志文件里都不出现 token 原值
+ *   M4  codex 端点探活：pyyaml 随包带上（`docs/15` B1）
  *
  * 用法：pnpm sidecar:smoke
  */
@@ -25,6 +26,28 @@ const venvPython =
   process.platform === 'win32'
     ? path.join(SIDECAR_DIR, '.venv', 'Scripts', 'python.exe')
     : path.join(SIDECAR_DIR, '.venv', 'bin', 'python');
+
+// 打包产物探活：`--packed` 或 `INKSTONE_SIDECAR_BIN` 指向 `inkstone-sidecar.exe` 时，
+// 对着**打包产物**跑冒烟（步骤 07 §3.2 的要求），而不是对着 venv。
+// 打包产物的鉴权 / 握手 / 优雅退出 / 日志脱敏必须与开发态同一套判据。
+const packedFlag = process.argv.includes('--packed');
+const packedBinary =
+  process.env.INKSTONE_SIDECAR_BIN ||
+  (packedFlag
+    ? path.join(
+        REPO_ROOT,
+        'apps',
+        'desktop',
+        'resources',
+        'sidecar',
+        'inkstone-sidecar',
+        process.platform === 'win32' ? 'inkstone-sidecar.exe' : 'inkstone-sidecar',
+      )
+    : '');
+const usePacked = packedBinary !== '';
+// 启动命令：打包产物直接用 exe（无 `-m inkstone`），venv 用 `python -m inkstone`。
+const launchCommand = usePacked ? packedBinary : venvPython;
+const launchArgs = usePacked ? [] : ['-m', 'inkstone'];
 
 const READY_PREFIX = 'INKSTONE_READY ';
 const HANDSHAKE_TIMEOUT_MS = 20_000;
@@ -65,16 +88,27 @@ function cleanup() {
 }
 
 /** 依赖必须在 setup 之后才存在，先探一下给个可照做的提示。 */
-if (!fs.existsSync(venvPython)) {
-  process.stderr.write(`\n[sidecar:smoke] 虚拟环境不存在：${venvPython}\n请先执行：pnpm sidecar:setup\n\n`);
+if (!usePacked && !fs.existsSync(venvPython)) {
+  process.stderr.write(
+    `\n[sidecar:smoke] 虚拟环境不存在：${venvPython}\n请先执行：pnpm sidecar:setup\n\n`,
+  );
+  cleanup();
+  process.exit(1);
+}
+if (usePacked && !fs.existsSync(packedBinary)) {
+  process.stderr.write(
+    `\n[sidecar:smoke] 打包产物不存在：${packedBinary}\n请先执行：pnpm build:sidecar\n\n`,
+  );
   cleanup();
   process.exit(1);
 }
 
-process.stdout.write(`[sidecar:smoke] 启动 sidecar…（沙箱 ${sandbox}）\n`);
+process.stdout.write(
+  `[sidecar:smoke] 启动 sidecar…（${usePacked ? '打包产物' : 'venv'}，沙箱 ${sandbox}）\n`,
+);
 
-child = spawn(venvPython, ['-m', 'inkstone'], {
-  cwd: SIDECAR_DIR,
+child = spawn(launchCommand, launchArgs, {
+  cwd: usePacked ? path.dirname(packedBinary) : SIDECAR_DIR,
   // stdin 保留管道：sidecar 靠它做孤儿进程防护；关掉会让进程立刻自杀。
   stdio: ['pipe', 'pipe', 'pipe'],
   windowsHide: true,
@@ -86,7 +120,8 @@ child = spawn(venvPython, ['-m', 'inkstone'], {
     INKSTONE_PARENT_PID: String(process.pid),
     PYTHONUNBUFFERED: '1',
     PYTHONUTF8: '1',
-    PYTHONPATH: path.join(SIDECAR_DIR, 'src'),
+    // venv 态要 PYTHONPATH 指到 src；打包产物自带模块，注入反而可能覆盖它自己的路径。
+    ...(usePacked ? {} : { PYTHONPATH: path.join(SIDECAR_DIR, 'src') }),
   },
 });
 
@@ -142,9 +177,17 @@ while (!ready) {
 // ---- A2 就绪行字段 ----
 check('A2 就绪行前缀与 JSON 解析正确', true);
 check('A2 v === 1', ready.v === 1, `实际 ${String(ready.v)}`);
-check('A2 port 是正整数', Number.isInteger(ready.port) && ready.port > 0, `实际 ${String(ready.port)}`);
+check(
+  'A2 port 是正整数',
+  Number.isInteger(ready.port) && ready.port > 0,
+  `实际 ${String(ready.port)}`,
+);
 check('A2 pid 是正整数', Number.isInteger(ready.pid) && ready.pid > 0, `实际 ${String(ready.pid)}`);
-check('A2 version 非空', typeof ready.version === 'string' && ready.version.length > 0, `实际 ${String(ready.version)}`);
+check(
+  'A2 version 非空',
+  typeof ready.version === 'string' && ready.version.length > 0,
+  `实际 ${String(ready.version)}`,
+);
 
 const baseUrl = `http://127.0.0.1:${ready.port}`;
 
@@ -153,26 +196,84 @@ try {
   const res = await fetch(`${baseUrl}/api/v1/healthz`, { signal: AbortSignal.timeout(3_000) });
   const body = await res.json().catch(() => ({}));
   check('A5 /healthz 无 token 返回 200', res.status === 200, `实际 ${res.status}`);
-  check('A5 /healthz 返回 ok/version/uptimeMs', body?.ok === true && typeof body?.version === 'string' && typeof body?.uptimeMs === 'number');
+  check(
+    'A5 /healthz 返回 ok/version/uptimeMs',
+    body?.ok === true && typeof body?.version === 'string' && typeof body?.uptimeMs === 'number',
+  );
 } catch (err) {
   check('A5 /healthz 可达', false, String(err));
 }
 
 // ---- A5 受保护端点鉴权 ----
 try {
-  const noToken = await fetch(`${baseUrl}/api/v1/shutdown`, { method: 'POST', signal: AbortSignal.timeout(3_000) });
+  const noToken = await fetch(`${baseUrl}/api/v1/shutdown`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(3_000),
+  });
   const body = await noToken.json().catch(() => ({}));
   check('A5 受保护端点无 token 返回 401', noToken.status === 401, `实际 ${noToken.status}`);
-  check('A5 401 使用统一错误信封', body?.error?.code === 'UNAUTHORIZED', `实际 ${JSON.stringify(body)}`);
+  check(
+    'A5 401 使用统一错误信封',
+    body?.error?.code === 'UNAUTHORIZED',
+    `实际 ${JSON.stringify(body)}`,
+  );
 
   const wrongToken = await fetch(`${baseUrl}/api/v1/shutdown`, {
     method: 'POST',
     headers: { 'X-Inkstone-Token': 'deadbeef'.repeat(8) },
     signal: AbortSignal.timeout(3_000),
   });
-  check('A5 错误 token 同样返回 401（不区分缺失/错误）', wrongToken.status === 401, `实际 ${wrongToken.status}`);
+  check(
+    'A5 错误 token 同样返回 401（不区分缺失/错误）',
+    wrongToken.status === 401,
+    `实际 ${wrongToken.status}`,
+  );
 } catch (err) {
   check('A5 鉴权链路', false, String(err));
+}
+
+// ---- 生成端点探活（打包特有：验 prompt 模板随包带上） ----
+// 未配 provider 时 /ai/continue 应返回 400 + AI_NOT_CONFIGURED（配置缺失），
+// 而不是 500（500 才是"模板没随包带上 / 打包损坏"的信号，docs/10 §3.1）。
+try {
+  const res = await fetch(`${baseUrl}/api/v1/ai/continue`, {
+    method: 'POST',
+    headers: { 'X-Inkstone-Token': token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      workId: 'smoke-work',
+      chapterId: 'smoke-chapter',
+      prefix: '他推开门',
+    }),
+    signal: AbortSignal.timeout(3_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  const code = body?.error?.code ?? '';
+  check(
+    '生成端点返回配置错误（400，非 500 模板缺失）',
+    res.status === 400 && code === 'AI_NOT_CONFIGURED',
+    `实际 ${res.status} ${code || JSON.stringify(body).slice(0, 80)}`,
+  );
+} catch (err) {
+  check('生成端点探活', false, String(err));
+}
+
+// ---- Codex 端点探活（打包特有：验 pyyaml 随包带上，docs/15 B1） ----
+// codex 路由的 import 链里有 `import yaml`（frontmatter 解析）。打包产物缺
+// pyyaml 时，症状是应用启动即崩或该路由 500。未开作品的 codex 清单应返回
+// 404 + WORK_NOT_FOUND（业务分支），而不是 500（打包损坏的信号）。
+try {
+  const res = await fetch(`${baseUrl}/api/v1/works/smoke-work/codex`, {
+    headers: { 'X-Inkstone-Token': token },
+    signal: AbortSignal.timeout(3_000),
+  });
+  const body = await res.json().catch(() => ({}));
+  check(
+    'codex 端点返回业务错误（404，非 500 依赖缺失）',
+    res.status === 404 && body?.error?.code === 'WORK_NOT_FOUND',
+    `实际 ${res.status} ${body?.error?.code ?? JSON.stringify(body).slice(0, 80)}`,
+  );
+} catch (err) {
+  check('codex 端点探活', false, String(err));
 }
 
 // ---- A6 优雅退出 ----
@@ -187,10 +288,7 @@ try {
   check('A6 /shutdown 可达', false, String(err));
 }
 
-const exited = await Promise.race([
-  exitInfo,
-  sleep(EXIT_WAIT_MS).then(() => null),
-]);
+const exited = await Promise.race([exitInfo, sleep(EXIT_WAIT_MS).then(() => null)]);
 check('A6 进程在等待窗口内自行退出（无需强杀）', exited !== null);
 if (exited) check('A6 退出码为 0', exited.code === 0, `实际 code=${String(exited.code)}`);
 

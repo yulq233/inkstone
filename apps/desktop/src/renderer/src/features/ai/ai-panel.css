@@ -1,0 +1,397 @@
+/* ---------------------------------------------------------------------------
+   AI 候选条 + 幽灵文本（`docs/11` §6.1 / §6.4）
+
+   只用 `global.css` 的主题变量，**不新增色板** —— 与 `settings/ai.css` 同一条约束。
+   幽灵文本取 `--info`（蓝）而不是 `--accent`（绿）：绿在本应用里已经是"保存成功"的
+   语义，用它画候选会让人误以为"这段已经进正文了"。
+
+   ⚠️ 刻意不用 `--radius-sm`：本仓库被引用了多次却**从未定义**（拿到的是 0 圆角）。
+   那是既有问题，不属于这次改动，新代码不跟着用。
+
+   ⚠️ 文件名叫 `ai-panel.css` 而不是 `ai.css`：`features/settings/` 下已经有一个
+   `ai.css`（AI 设置分区），两个同名文件在 grep/打包产物里都分不清谁是谁。
+--------------------------------------------------------------------------- */
+
+.ai-ghost-text {
+  /* 候选里可能有换行。不写这条，多段候选会被压成一行 —— 而正文里的换行
+     是靠块级结构表达的，装饰拿不到那个结构，只能靠 CSS */
+  white-space: pre-wrap;
+  color: var(--info);
+  opacity: 0.75;
+  /* 它不在文档里，选中没有意义，反而让人以为可以复制走 */
+  user-select: none;
+}
+
+.ai-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.ai-panel-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+.ai-panel-title {
+  font-weight: 600;
+}
+
+.ai-panel-detail,
+.ai-panel-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* 提示行与状态本身要分得开：它说的是"你可能没注意到的事" */
+.ai-panel-hint {
+  font-style: italic;
+  color: var(--text-faint);
+}
+
+.ai-panel-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 主操作（接受 / 重试）与次操作（不要 / 关闭）要一眼分得开：
+   两个默认样式的按钮并排时，用户会随手点错那一个，而这两个的后果正相反 */
+.ai-panel-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.ai-panel-error {
+  border-color: var(--danger);
+}
+
+.ai-panel-error .ai-panel-title {
+  color: var(--danger);
+}
+
+.ai-panel-running .spinner {
+  align-self: flex-start;
+}
+
+/* ---------------------------------------------------------------------------
+   快捷生成面板（`docs/11` §6.3）
+   模态浮层：独占注意力，用户进来就是"挑一个"，挑完即关。
+--------------------------------------------------------------------------- */
+
+.quick-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.32);
+}
+
+.quick-panel {
+  width: min(480px, 90vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.24);
+  overflow: hidden;
+}
+
+.quick-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.quick-head h3 {
+  margin: 0;
+  font-size: 15px;
+}
+
+.quick-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  overflow-y: auto;
+}
+
+.quick-running {
+  align-items: center;
+  flex-direction: row;
+}
+
+.quick-error {
+  align-items: flex-start;
+}
+
+/* 候选列表：整行可点，去掉列表自带的数字/圆点（每个候选就是一行可点区域） */
+.quick-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.quick-item {
+  width: 100%;
+  text-align: left;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.quick-item:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+/* 段落型候选：一段简介 / 场景，原样展示再插入 */
+.quick-block {
+  white-space: pre-wrap;
+  margin: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px;
+  background: var(--surface-2);
+}
+
+.quick-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.quick-actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.quick-foot {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+}
+
+/* ---------------------------------------------------------------------------
+   斜杠菜单（`docs/11` §6.3）
+   一个小浮层，列 8 个指令 + 快捷键提示。定位由渲染侧决定，这里只定外观。
+--------------------------------------------------------------------------- */
+
+.slash-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 260px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+}
+
+.slash-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 7px 10px;
+  border: none;
+  border-radius: var(--radius);
+  background: transparent;
+  text-align: left;
+}
+
+.slash-item:hover:not(:disabled) {
+  border-color: transparent;
+  color: var(--text);
+}
+
+.slash-item-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.slash-label {
+  font-size: 13px;
+}
+
+.slash-shortcut {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.slash-hint {
+  margin: 4px 10px 2px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* ---------------------------------------------------------------------------
+   外发记录面板（`docs/11` §6.7，D-10 落在工作台内）
+   —— 与「将发送什么」（`.preview-panel`）**共用形状**：都是一个"入口按钮 + 一句摘要
+   + 点开才加载的正文区"。两条规则写成同一个选择器组，免得只改一处、两个面板长得不一样。
+--------------------------------------------------------------------------- */
+
+.egress-panel,
+.preview-panel {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+
+.egress-body,
+.preview-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.egress-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.egress-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.egress-table th,
+.egress-table td {
+  padding: 6px 8px;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+.egress-table th {
+  color: var(--text-faint);
+  font-weight: 600;
+}
+
+/* ---------------------------------------------------------------------------
+   「将发送什么」的展示体（`docs/11` §6.4 / §6.7）
+
+   被两处复用：工作台里的常驻入口与首次发送的确认卡。所以这里的规则
+   **不能假设自己在模态框里**（模态由 `.modal` 负责滚动与宽度），也不能假设
+   自己在窄栏里 —— 只负责"原文块可读、可展开、不撑破容器"。
+--------------------------------------------------------------------------- */
+
+.ctx-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 那一句"这次会把 N 个字符发给谁" —— 整张卡的主句，权重高于正文 */
+.ctx-summary {
+  margin: 0;
+  color: var(--text);
+  font-weight: 600;
+}
+
+.ctx-block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  padding: 6px 10px;
+}
+
+.ctx-block > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.ctx-block > summary:hover {
+  color: var(--text);
+}
+
+/*
+ * 发送原文块。
+ *
+ * `pre` + `pre-wrap` 是刻意的：换行与缩进**是要发出去的样子的一部分**，
+ * 重排之后用户看到的就不是模型实际收到的那一段了。`break-word` 是因为
+ * 中文长句与长 URL 都不会自己断行，不写会把容器撑出横向滚动。
+ *
+ * 限高 + 内部滚动：一次续写的前文可以有 2000 字，全展开会把确认卡撑成好几屏，
+ * 而用户反而不会看（直接滚到底按「继续」）。
+ */
+.ctx-text {
+  margin: 6px 0 0;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  line-height: 1.7;
+  color: var(--text-muted);
+}
+
+.ctx-blocks {
+  margin: 6px 0 0;
+  padding-left: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.ctx-blocks summary {
+  cursor: pointer;
+}
+
+.ctx-slot {
+  margin-right: 8px;
+  color: var(--text);
+}
+
+/* ---------------------------------------------------------------------------
+   首次发送的确认卡（`docs/11` §2.3）
+   `.modal` / `.modal-backdrop` / `.actions` 都是应用级原语（`global.css`），
+   这里只补主按钮的强调 —— `.primary` 在别处只被
+   `.ai-panel-actions` / `.quick-actions` 作用域覆盖，这里的容器是 `.actions`。
+--------------------------------------------------------------------------- */
+
+.egress-confirm .actions {
+  margin-top: 14px;
+}
+
+/* 与 `.ai-panel-actions button.primary` 同款（`--accent-soft` + `--accent`）：
+   深色主题下 `--accent` 是浅绿，配白字会糊成一片，所以不写死 #fff。 */
+.egress-confirm .actions button.primary {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}

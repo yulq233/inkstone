@@ -18,13 +18,35 @@
 import {
   ErrorCode,
   isApiErrorBody,
+  type AiModelsResponse,
+  type AiPreviewRequest,
+  type AiPreviewResponse,
+  type AiRunsResponse,
+  type AiRunFeedback,
+  type AiTestResponse,
+  type BrokenRelationsResponse,
   type ChapterContent,
+  type ChapterOutline,
+  type ChapterOutlineResponse,
   type ChapterSummary,
+  type CodexEntry,
+  type CodexEntryResponse,
+  type CodexListResponse,
+  type CodexType,
   type CreateChapterRequest,
+  type CreateCodexRequest,
   type CreateWorkRequest,
+  type ForeshadowInput,
+  type ForeshadowListResponse,
+  type GeneralOutline,
   type HealthzResponse,
+  type ModelSpec,
   type RecentWork,
   type UpdateChapterRequest,
+  type UpdateCodexRequest,
+  type VolumeListResponse,
+  type VolumeOutline,
+  type VolumeOutlineResponse,
   type WorkSummary,
   type WriteChapterResult,
 } from '@inkstone/shared';
@@ -34,6 +56,20 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 
 /** 探活超时短一些：它只用来回答"还活着吗"，卡住就该早点判定失败。 */
 const PROBE_TIMEOUT_MS = 4_000;
+
+/**
+ * AI 请求超时。
+ *
+ * **必须与普通请求分开**（所以上面那条 10 秒的规则对 AI 不适用）：
+ * AI 的耗时由**上游模型**决定，不是本地服务 —— 一次冷启动的云端请求
+ * 加上 DNS/TLS 往返，10 秒很容易不够。而超时的表现是 `NETWORK`，
+ * 界面上会显示"本地服务响应超时"，把用户引到完全错误的方向去查。
+ *
+ * 这个值比 sidecar 侧网关的超时（connect 8s + read 30s）留足余量：
+ * 让**网关**先超时，它给的错误（`AI_TIMEOUT`，带"换一个模型"的建议）比这里的
+ * `NETWORK` 有用得多。
+ */
+const AI_TIMEOUT_MS = 45_000;
 
 /** 网络层失败（连不上、超时）用的伪错误码。它不出现在 HTTP 信封里。 */
 export const NETWORK_ERROR_CODE = 'NETWORK';
@@ -82,6 +118,33 @@ interface RequestOptions {
 
 const API_PREFIX = '/api/v1';
 
+/**
+ * 拼完整 URL。
+ *
+ * 单独一个函数而不是在各处写模板串：`/api/v1` 前缀漏掉一次的症状是 404，
+ * 而 404 的文案会指向"作品不存在"，排查起来要绕一大圈。多一个共用点就少一条这种路。
+ */
+export function apiEndpoint(connection: ApiConnection, path: string): string {
+  return `${connection.baseUrl}${API_PREFIX}${path}`;
+}
+
+/**
+ * 把一次失败的响应收敛成 `ApiError`。
+ *
+ * 抽出来给**流式请求**复用（`lib/ai-stream.ts`）：它不能用 `request()`
+ * （那条路有 10 秒总超时），但"信封怎么解"必须与它逐字一致 ——
+ * 各写一份的下场是"加了一个新错误码，只有一边认得"。
+ */
+export async function toApiError(res: Response): Promise<ApiError> {
+  const payload = await readJson(res);
+  if (isApiErrorBody(payload)) {
+    const { code, message, detail, traceId } = payload.error;
+    return new ApiError(code, message, res.status, detail, traceId);
+  }
+  // 不是我们的信封（比如框架直接返回的页面）。保留状态码，别假装看得懂。
+  return new ApiError(`HTTP_${res.status}`, `请求失败：HTTP ${res.status}`, res.status);
+}
+
 export class ApiClient {
   constructor(private readonly conn: ApiConnection) {}
 
@@ -108,7 +171,7 @@ export class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${this.conn.baseUrl}${API_PREFIX}${path}`, init);
+      res = await fetch(apiEndpoint(this.conn, path), init);
     } catch (err) {
       // 这里包含超时（AbortSignal）与 sidecar 已死。两者对用户的含义相同：
       // "本地服务没响应"，重试一次通常就好了（主进程会自动重启 sidecar）。
@@ -121,17 +184,9 @@ export class ApiClient {
       );
     }
 
+    if (!res.ok) throw await toApiError(res);
+
     const payload = await readJson(res);
-
-    if (!res.ok) {
-      if (isApiErrorBody(payload)) {
-        const { code, message, detail, traceId } = payload.error;
-        throw new ApiError(code, message, res.status, detail, traceId);
-      }
-      // 不是我们的信封（比如框架直接返回的页面）。保留状态码，别假装看得懂。
-      throw new ApiError(`HTTP_${res.status}`, `请求失败：HTTP ${res.status}`, res.status);
-    }
-
     return payload as T;
   }
 
@@ -210,6 +265,214 @@ export class ApiClient {
       `/works/${encodeURIComponent(workId)}/chapters/${encodeURIComponent(chapterId)}`,
       body,
     );
+  }
+
+  // ---- AI（`docs/11` P0）----
+
+  /**
+   * 拉供应商的模型列表。
+   *
+   * 超时按 AI 算：这是一次真实的外发请求，服务端要等上游返回。
+   */
+  async listAiModels(providerId: string): Promise<ModelSpec[]> {
+    const res = await this.get<AiModelsResponse>(
+      `/ai/providers/${encodeURIComponent(providerId)}/models`,
+      { timeoutMs: AI_TIMEOUT_MS },
+    );
+    return res.items;
+  }
+
+  /**
+   * 「将发送什么」（`POST /ai/preview`，`docs/11` §6.4 / §6.7）。
+   *
+   * ⚠️ 超时按**普通请求**算，不是 `AI_TIMEOUT_MS`：这条端点只做本地装配
+   * （读设定文件 + 渲染模板），**不碰上游模型**。用 45 秒会让"本地服务真出事了"
+   * 这件事晚 35 秒才被说出来，而预览恰好是每次生成之前的那一步 ——
+   * 卡在这里等于整个写作流卡住。
+   */
+  previewAi(body: AiPreviewRequest): Promise<AiPreviewResponse> {
+    return this.post<AiPreviewResponse>('/ai/preview', body);
+  }
+
+  /**
+   * 连接测试。服务端会**真的发一次最小对话请求**，所以它能验出"密钥对不对"，
+   * 而不只是"地址通不通"。
+   *
+   * 失败时抛 `ApiError`，`code` 是 `AI_*` 那一族 —— 注意 `AI_AUTH_FAILED` 与
+   * `UNAUTHORIZED` 是**两个码**：前者是上游拒绝了密钥，后者才是本地 token 失效。
+   * 所以这里**不能**用 `err.isUnauthorized` 去判断要不要进 FAILED 界面。
+   */
+  testAiConnection(providerId: string, model: string): Promise<AiTestResponse> {
+    return this.post<AiTestResponse>(
+      '/ai/test',
+      { providerId, model },
+      { timeoutMs: AI_TIMEOUT_MS },
+    );
+  }
+
+  /**
+   * 拉生成记录 + 当日用量。
+   *
+   * 超时按普通请求算：这两项都是读本地文件（用量那边还有按 `mtime` 的缓存），
+   * 不涉及上游模型 —— 用 `AI_TIMEOUT_MS` 只会让"sidecar 真出事了"这件事晚 35 秒才被说出来。
+   */
+  listAiRuns(
+    workId: string,
+    options: { since?: string; limit?: number } = {},
+  ): Promise<AiRunsResponse> {
+    const query = new URLSearchParams({ workId });
+    if (options.since !== undefined && options.since !== '') query.set('since', options.since);
+    if (options.limit !== undefined) query.set('limit', String(options.limit));
+    return this.get<AiRunsResponse>(`/ai/runs?${query.toString()}`);
+  }
+
+  /**
+   * 回填采纳结果（accepted）。
+   *
+   * 失败**不该打断用户**：这只是统计，删掉候选文本这件事与它是否记上无关。
+   * 所以调用方应吞掉这里的异常（记一条日志即可），不要弹提示。
+   */
+  sendAiFeedback(runId: string, body: AiRunFeedback): Promise<{ ok: boolean }> {
+    return this.post<{ ok: boolean }>(`/ai/runs/${encodeURIComponent(runId)}/feedback`, body);
+  }
+
+  // ---- Codex（设定条目，docs/15 B1）----
+
+  async listCodex(workId: string): Promise<CodexListResponse['items']> {
+    const res = await this.get<CodexListResponse>(`/works/${encodeURIComponent(workId)}/codex`);
+    return res.items;
+  }
+
+  async createCodexEntry(workId: string, body: CreateCodexRequest): Promise<CodexEntry> {
+    const res = await this.post<CodexEntryResponse>(
+      `/works/${encodeURIComponent(workId)}/codex`,
+      body,
+    );
+    return res.entry;
+  }
+
+  async readCodexEntry(workId: string, entryType: CodexType, slug: string): Promise<CodexEntry> {
+    const res = await this.get<CodexEntryResponse>(
+      `/works/${encodeURIComponent(workId)}/codex/${encodeURIComponent(entryType)}/${encodeURIComponent(slug)}`,
+    );
+    return res.entry;
+  }
+
+  /** PUT 条目。`body` 不含 slug/hash（服务端派生字段，回灌会被 400）。 */
+  async writeCodexEntry(
+    workId: string,
+    entryType: CodexType,
+    slug: string,
+    body: UpdateCodexRequest,
+  ): Promise<CodexEntry> {
+    const res = await this.put<CodexEntryResponse>(
+      `/works/${encodeURIComponent(workId)}/codex/${encodeURIComponent(entryType)}/${encodeURIComponent(slug)}`,
+      body,
+    );
+    return res.entry;
+  }
+
+  async deleteCodexEntry(workId: string, entryType: CodexType, slug: string): Promise<void> {
+    await this.delete<{ ok: boolean }>(
+      `/works/${encodeURIComponent(workId)}/codex/${encodeURIComponent(entryType)}/${encodeURIComponent(slug)}`,
+    );
+  }
+
+  async listBrokenRelations(workId: string): Promise<BrokenRelationsResponse['items']> {
+    const res = await this.get<BrokenRelationsResponse>(
+      `/works/${encodeURIComponent(workId)}/codex/broken-relations`,
+    );
+    return res.items;
+  }
+
+  // ---- 大纲（docs/15 B2）----
+
+  async readGeneralOutline(workId: string): Promise<GeneralOutline> {
+    return this.get<GeneralOutline>(`/works/${encodeURIComponent(workId)}/outline/general`);
+  }
+
+  async writeGeneralOutline(
+    workId: string,
+    body: string,
+    ifMatch: string,
+  ): Promise<{ hash: string }> {
+    return this.put<{ hash: string }>(`/works/${encodeURIComponent(workId)}/outline/general`, {
+      body,
+      ifMatch,
+    });
+  }
+
+  async listVolumes(workId: string): Promise<VolumeListResponse['items']> {
+    const res = await this.get<VolumeListResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes`,
+    );
+    return res.items;
+  }
+
+  async readVolume(workId: string, order: number): Promise<VolumeOutline> {
+    const res = await this.get<VolumeOutlineResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes/${order}`,
+    );
+    return res.volume;
+  }
+
+  async createVolume(workId: string, title: string, body: string): Promise<VolumeOutline> {
+    const res = await this.post<VolumeOutlineResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes`,
+      { title, body },
+    );
+    return res.volume;
+  }
+
+  async writeVolume(
+    workId: string,
+    order: number,
+    body: { title: string; body: string; order?: number | null; ifMatch: string },
+  ): Promise<VolumeOutline> {
+    const res = await this.put<VolumeOutlineResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes/${order}`,
+      body,
+    );
+    return res.volume;
+  }
+
+  async deleteVolume(workId: string, order: number): Promise<void> {
+    await this.delete<{ ok: boolean }>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes/${order}`,
+    );
+  }
+
+  async reorderVolume(workId: string, order: number, direction: 'up' | 'down'): Promise<void> {
+    await this.post<{ ok: boolean }>(
+      `/works/${encodeURIComponent(workId)}/outline/volumes/${order}/reorder`,
+      { direction },
+    );
+  }
+
+  async readChapterOutline(workId: string, chapterId: string): Promise<ChapterOutline> {
+    const res = await this.get<ChapterOutlineResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/chapters/${encodeURIComponent(chapterId)}`,
+    );
+    return res.outline;
+  }
+
+  async writeChapterOutline(
+    workId: string,
+    chapterId: string,
+    body: { body: string; foreshadow: ForeshadowInput[] | null; ifMatch: string },
+  ): Promise<ChapterOutline> {
+    const res = await this.put<ChapterOutlineResponse>(
+      `/works/${encodeURIComponent(workId)}/outline/chapters/${encodeURIComponent(chapterId)}`,
+      body,
+    );
+    return res.outline;
+  }
+
+  async listForeshadows(workId: string): Promise<ForeshadowListResponse['items']> {
+    const res = await this.get<ForeshadowListResponse>(
+      `/works/${encodeURIComponent(workId)}/foreshadows`,
+    );
+    return res.items;
   }
 }
 

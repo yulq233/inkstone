@@ -220,7 +220,10 @@ export class SidecarSupervisor {
     if (this.healthFailures < HEALTH_FAIL_THRESHOLD) return;
 
     this.healthFailures = 0;
-    this.scheduleRestart('unhealthy', `连续 ${HEALTH_FAIL_THRESHOLD} 次探活失败，判定本地服务无响应`);
+    this.scheduleRestart(
+      'unhealthy',
+      `连续 ${HEALTH_FAIL_THRESHOLD} 次探活失败，判定本地服务无响应`,
+    );
     this.launcher?.hardKill();
   }
 

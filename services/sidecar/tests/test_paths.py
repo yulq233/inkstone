@@ -17,7 +17,6 @@ from inkstone.domain.paths import (
     slugify,
 )
 
-
 # ---- slugify ----
 
 
@@ -142,4 +141,7 @@ def test_chapter_paths_nest_under_manuscript(tmp_path: Path) -> None:
 
 def test_scaffold_dirs_cover_the_documented_skeleton(tmp_path: Path) -> None:
     names = {p.name for p in WorkPaths(tmp_path).scaffold_dirs()}
-    assert names == {"outline", "卷纲", "manuscript", "codex", "snippets", "styles", ".inkstone", "logs", "backups"}
+    assert names == {
+        "outline", "卷纲", "manuscript", "codex",
+        "snippets", "styles", ".inkstone", "logs", "backups",
+    }

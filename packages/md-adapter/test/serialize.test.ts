@@ -98,12 +98,15 @@ describe('序列化 · 行首消歧', () => {
 
 describe('序列化 · 行内标记开合', () => {
   const t = (text: string, marks: string[] = []) =>
-    inkstoneSchema.text(text, marks.map((name) => inkstoneSchema.marks[name].create()));
+    inkstoneSchema.text(
+      text,
+      marks.map((name) => inkstoneSchema.marks[name].create()),
+    );
 
   it('相邻同标记合并输出', () => {
-    expect(toMd(doc(inkstoneSchema.node('paragraph', null, [t('粗'), t('体', ['bold'])]))).markdown).toBe(
-      '粗**体**\n',
-    );
+    expect(
+      toMd(doc(inkstoneSchema.node('paragraph', null, [t('粗'), t('体', ['bold'])]))).markdown,
+    ).toBe('粗**体**\n');
   });
 
   it('加粗内嵌斜体按嵌套输出', () => {
@@ -118,7 +121,10 @@ describe('序列化 · 行内标记开合', () => {
   });
 
   it('加粗与斜体相邻时正确收合', () => {
-    const paragraph = inkstoneSchema.node('paragraph', null, [t('粗', ['bold']), t('斜', ['italic'])]);
+    const paragraph = inkstoneSchema.node('paragraph', null, [
+      t('粗', ['bold']),
+      t('斜', ['italic']),
+    ]);
     // 两个分隔符会拼成 `***`，解析端必须能把它拆回「加粗收尾 + 斜体开头」。
     expect(toMd(doc(paragraph)).markdown).toBe('**粗***斜*\n');
     expect(render('**粗***斜*')).toBe('**粗***斜*\n');

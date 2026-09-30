@@ -2,6 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { SidecarReadyPayload } from '@inkstone/shared';
+import { redactSecrets } from '../redact';
 import { SidecarEnvError, assertLaunchSpecUsable, type SidecarLaunchSpec } from './env';
 
 /** 就绪行前缀，必须与 sidecar 的 __main__.py 保持一致 */
@@ -24,6 +25,8 @@ export class SidecarLauncher {
   private settled = false;
   private readyPayload: SidecarReadyPayload | null = null;
   private stdoutBuf = '';
+  /** `writeLog` 的行缓冲 —— 见那里"为什么不能逐块擦"的注释。 */
+  private logBuffer = '';
   private tail: string[] = [];
   private handshakeTimer: NodeJS.Timeout | null = null;
   private logStream: fs.WriteStream | null = null;
@@ -142,8 +145,14 @@ export class SidecarLauncher {
    */
   hardKill(): void {
     const pids = new Set<number>();
-    if (this.readyPayload) pids.add(this.readyPayload.pid);
-    if (this.child?.pid) pids.add(this.child.pid);
+    // 这里再挡一层看似与 `maybeReady` 的校验重复，但这条路径的代价是**孤儿进程**，
+    // 而 `taskkill /PID undefined` 是静默无操作 —— 多一次类型判断非常划算。
+    const readyPid = this.readyPayload?.pid;
+    if (typeof readyPid === 'number' && Number.isInteger(readyPid) && readyPid > 0) {
+      pids.add(readyPid);
+    }
+    const childPid = this.child?.pid;
+    if (typeof childPid === 'number' && childPid > 0) pids.add(childPid);
     for (const pid of pids) this.killTree(pid);
   }
 
@@ -196,11 +205,26 @@ export class SidecarLauncher {
       return;
     }
     if (payload.v !== SUPPORTED_PROTOCOL) {
-      this.fail('spawn_error', `握手协议版本不匹配：sidecar=${payload.v}，应用=${SUPPORTED_PROTOCOL}`);
+      this.fail(
+        'spawn_error',
+        `握手协议版本不匹配：sidecar=${payload.v}，应用=${SUPPORTED_PROTOCOL}`,
+      );
       return;
     }
     if (!Number.isInteger(payload.port) || payload.port <= 0) {
       this.fail('spawn_error', `就绪行端口非法：${String(payload.port)}`);
+      return;
+    }
+    /**
+     * `pid` 必须与 `port` 一起校验（`docs/13` M15）。
+     *
+     * 它是 `hardKill()` 强杀的依据，而 `taskkill /PID undefined /T /F` **不报错** ——
+     * 它只是什么都不做。于是握手"成功"、功能全可用，退出时却留下一个**孤儿 sidecar**
+     * 占着端口与 stdio 管道（管道不关，`child.on('exit')` 也不触发，退出流程会卡住）。
+     * 在这里拦下比事后去用户机器上查进程树便宜得多。
+     */
+    if (!Number.isInteger(payload.pid) || payload.pid <= 0) {
+      this.fail('spawn_error', `就绪行进程号非法：${String(payload.pid)}`);
       return;
     }
     this.settled = true;
@@ -226,19 +250,59 @@ export class SidecarLauncher {
   }
 
   private closeLogStream(): void {
+    // 先把缓冲里那半行吐出去 —— 否则"最后一行没带换行"的收尾输出会永远留在内存里。
+    this.flushLogBuffer();
     this.logStream?.end();
     this.logStream = null;
   }
 
+  /**
+   * 写 sidecar 的 stdout / stderr（`docs/13` M11）。
+   *
+   * ## 为什么这里也必须脱敏
+   *
+   * 这条出口写的是 `<userData>/logs/sidecar-stdio.log`，**和 sidecar 自己那份日志
+   * 是两个文件** —— 后者经过它自己的 `redact()` / `scrub()`，这一份此前完全没有。
+   * 不能让"对面已经脱敏了"成为唯一防线：A9 验收项查的正是主进程的日志目录，
+   * 而在主进程眼里 sidecar 的输出就是一段**不可信文本**（它与上游 HTTP 打交道，
+   * 报错里带出请求头是常事）。
+   *
+   * ## 为什么要攒成整行再擦，而不是逐块擦
+   *
+   * 管道 chunk 的边界**与行边界无关**：一个 `sk-abcdef123456` 完全可能被切成
+   * `sk-abc` + `def123456` 两块，逐块做时两块都不匹配任何形态，于是照样落盘。
+   * 所以先按 `\n` 攒成完整行，再对整行擦。
+   */
   private writeLog(chunk: string): void {
-    this.logStream?.write(chunk);
-    for (const line of chunk.split('\n')) {
-      if (line.trim().length === 0) continue;
-      // 开发态回显到终端，日志与 Electron 主进程输出混在一处，便于边写边看。
-      // 生产态不回显（没有终端），只进日志文件。
-      if (this.spec.devEcho) process.stdout.write(`[sidecar] ${line}\n`);
-      this.tail.push(line);
-    }
+    this.logBuffer += chunk;
+    const lines = this.logBuffer.split('\n');
+    // 最后一段可能是半行（还没等到换行），留着与下一个 chunk 拼。
+    this.logBuffer = lines.pop() ?? '';
+    for (const line of lines) this.emitLogLine(line);
+  }
+
+  /** 缓冲里剩下的半行 —— 只在收尾时当一整行处理。 */
+  private flushLogBuffer(): void {
+    if (this.logBuffer.length === 0) return;
+    const rest = this.logBuffer;
+    this.logBuffer = '';
+    this.emitLogLine(rest);
+  }
+
+  /**
+   * 单行的三条出口（日志文件 / 开发态终端 / 内存 tail）。
+   *
+   * **脱敏只在这一处做**：三条出口共享同一个已擦过的字符串，
+   * 不存在"某一条忘了擦"的可能 —— 那正是这个函数被拆出来的原因。
+   */
+  private emitLogLine(rawLine: string): void {
+    const line = redactSecrets(rawLine);
+    this.logStream?.write(`${line}\n`);
+    if (line.trim().length === 0) return;
+    // 开发态回显到终端，日志与 Electron 主进程输出混在一处，便于边写边看。
+    // 生产态不回显（没有终端），只进日志文件。
+    if (this.spec.devEcho) process.stdout.write(`[sidecar] ${line}\n`);
+    this.tail.push(line);
     if (this.tail.length > TAIL_LINES) {
       this.tail.splice(0, this.tail.length - TAIL_LINES);
     }

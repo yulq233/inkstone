@@ -1,10 +1,22 @@
 import type { Node as PMNode } from 'prosemirror-model';
 import { describe, expect, it } from 'vitest';
 
-import { fromMd, toMd } from '../src/index';
+import { fromMd, inkstoneSchema, toMd } from '../src/index';
 
 const render = (md: string): string => toMd(fromMd(md).doc).markdown;
 const docOf = (md: string): PMNode => fromMd(md).doc;
+
+/**
+ * 造一个"只有一个段落、段落里就是这段文字"的文档。
+ *
+ * 用它而不是 `fromMd`，是因为要测的正是"用户敲出来的东西序列化之后会不会被
+ * 解析器认成块级标记"—— 而经 `fromMd` 绕一圈就已经被解析过了，测不到。
+ * 这也保证文字**原样**进节点（含行尾空白、含 `---` 这种会被抢走的写法）。
+ */
+const paragraphDoc = (text: string): PMNode =>
+  inkstoneSchema.node('doc', null, [
+    inkstoneSchema.node('paragraph', null, text === '' ? [] : [inkstoneSchema.text(text)]),
+  ]);
 
 const blockTypes = (md: string): string[] => {
   const types: string[] = [];
@@ -16,7 +28,12 @@ const blockTypes = (md: string): string[] => {
 const inlineSpec = (node: PMNode): string[] => {
   const spec: string[] = [];
   node.forEach((child) => {
-    spec.push(`${child.marks.map((m) => m.type.name).sort().join('+')}:${child.text ?? ''}`);
+    spec.push(
+      `${child.marks
+        .map((m) => m.type.name)
+        .sort()
+        .join('+')}:${child.text ?? ''}`,
+    );
   });
   return spec;
 };
@@ -236,5 +253,92 @@ describe('白名单外语法：降级为纯文本且必须告警', () => {
     ].join('\n');
 
     expect(fromMd(novel).warnings).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+
+describe('坑：告警的偏移是**原文**下标，不是归一化后的下标（docs/13 M26）', () => {
+  /** 告警能不能被界面拿去从**原文**里切出它指的那一行 —— 这就是全部的意义。 */
+  const excerptIn = (source: string, label: string): string => {
+    const { warnings } = fromMd(source);
+    const warning = warnings.find((w) => w.message.includes(label));
+    if (warning === undefined) throw new Error(`没有「${label}」的告警`);
+    return source.slice(warning.from, warning.to);
+  };
+
+  it('CRLF + BOM + 标题补空行都不会让偏移错位', () => {
+    // 归一化会：剪掉 BOM（-1）、把 \r\n 变成 \n（-1/行）、给标题补一个空行（+1 行）
+    // —— 三个变换叠起来，用"归一化后的下标"去切原文会串到上一行去。
+    const source = '\uFEFF# 第一章\r\n\r\n正文\r\n| 甲 | 乙 |\r\n';
+    expect(excerptIn(source, '表格行')).toBe('| 甲 | 乙 |');
+  });
+
+  it('行尾空白与连续空行不会让偏移错位', () => {
+    const source = '正文   \n\n\n\n1. 他说\n';
+    expect(excerptIn(source, '有序列表')).toBe('1. 他说');
+  });
+
+  it('带 `>` 引用的行：偏移指向剥掉前缀之后的内容', () => {
+    const source = '> | 甲 | 乙 |\n';
+    expect(excerptIn(source, '表格行')).toBe('| 甲 | 乙 |');
+  });
+
+  it('4 级标题超出白名单时，偏移落在原文那一行上', () => {
+    const source = '\n\n#### 第四章\n';
+    expect(excerptIn(source, '超出白名单')).toBe('#### 第四章');
+  });
+
+  it('区间切出来就是那一行本身；终点不含行尾空白与换行', () => {
+    // 区间两端不是同一个坐标系里的量：`from` 是**原文**起点，
+    // `to = origin + 归一化后该行的长度`。归一化已经剪掉了行尾空白，
+    // 所以区间天然停在内容末尾 —— 这正是界面想要的效果（高亮那一行原文）。
+    // 反过来按"原文里那一行有多长"去算 `to` 是错的：会多吃进行尾空白。
+    const source = '第一行\n| 甲 | 乙 |   \n';
+    const { warnings } = fromMd(source);
+    const warning = warnings.find((w) => w.message.includes('表格行'));
+    expect(warning?.from).toBe('第一行\n'.length);
+    expect(source.slice(warning?.from, warning?.to)).toBe('| 甲 | 乙 |');
+  });
+});
+
+describe('坑：行首消歧要看**归一化之后**的样子（docs/13 M28）', () => {
+  it('内容是 `---` + 行尾空格的段落不会被夹成分隔线', () => {
+    // 反斜杠必须加在**行首**：normalize 会把行尾空白剪掉，
+    // 于是 `---   ` 会变成 `---`，下次解析就被块级解析器当成分隔线。
+    const doc = paragraphDoc('---   ');
+    expect(doc.firstChild?.type.name).toBe('paragraph');
+
+    const rendered = toMd(doc).markdown;
+    expect(rendered).toBe('\\---\n');
+    // 关键：再解析一次必须还是段落、内容还是 `---`
+    const again = fromMd(rendered);
+    expect(again.doc.firstChild?.type.name).toBe('paragraph');
+    expect(again.doc.textContent).toBe('---');
+    expect(toMd(again.doc).markdown).toBe(rendered);
+  });
+
+  it('`# 标题` + 行尾空格同理', () => {
+    const rendered = toMd(paragraphDoc('# 标题   ')).markdown;
+    expect(rendered).toBe('\\# 标题\n');
+    const again = fromMd(rendered);
+    expect(again.doc.firstChild?.type.name).toBe('paragraph');
+    expect(again.doc.textContent).toBe('# 标题');
+  });
+
+  it('`#` + 空格这种"看着像标题、其实不是"的写法不需要转义', () => {
+    // 行尾空白被剪掉之后剩一个 `#`，而 ATX 要求 `#` 后面有空白 —— 它天然是段落
+    expect(toMd(paragraphDoc('#   ')).markdown).toBe('#\n');
+    expect(fromMd('#\n').doc.firstChild?.type.name).toBe('paragraph');
+  });
+
+  it('只有空白的段落仍然被丢掉（不产生一行反斜杠）', () => {
+    expect(toMd(paragraphDoc('   ')).markdown).toBe('');
+  });
+
+  it('正常内容不受影响：不加多余的反斜杠', () => {
+    expect(toMd(paragraphDoc('---他说')).markdown).toBe('---他说\n');
+    expect(toMd(paragraphDoc('正文   ')).markdown).toBe('正文\n');
+    expect(toMd(paragraphDoc('「你来了。」老人说。')).markdown).toBe('「你来了。」老人说。\n');
   });
 });

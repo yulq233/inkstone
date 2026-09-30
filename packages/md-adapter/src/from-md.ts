@@ -44,7 +44,7 @@ import {
 } from '@inkstone/shared';
 import type { Node as PMNode } from 'prosemirror-model';
 
-import { normalize } from './normalize';
+import { normalize, normalizeToLines, type NormalizedLine } from './normalize';
 import { emptyParagraph, inkstoneSchema } from './schema';
 import type { AdapterWarning, FlatText, FromMdResult } from './types';
 
@@ -60,11 +60,13 @@ const ATX_HEADING = /^(#{1,6})[ \t]+(.*)$/;
 /** 分隔线：整行 3 个以上短横。 */
 const THEMATIC_LINE = /^-{3,}$/;
 
-interface Line {
-  text: string;
-  /** 该行首字符在规范化后文本中的偏移，用于告警定位 */
-  start: number;
-}
+/**
+ * 行类型就是归一化的行类型（`text` + `origin`）。
+ *
+ * `origin` 是**原文**起点而不是归一化后下标 —— 告警的 `from`/`to` 要能被界面
+ * 拿去切原文（`docs/13` M26），所以偏移必须一路保持原文坐标。
+ */
+type Line = NormalizedLine;
 
 interface Tok {
   ch: string;
@@ -94,16 +96,18 @@ const DEGRADATION_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
  *
  * 刻意**不**把"内容被改动"当成告警条件 —— 告警只在结构与用户预期不符时发出，
  * 否则每条正文都挂一串提示，提示就没价值了。
+ *
+ * `origin` 是该行在**原文**里的起点（不是归一化后下标，见上面的 `Line`）。
  */
-function detectDegradations(line: string, start: number): AdapterWarning[] {
+function detectDegradations(line: string, origin: number): AdapterWarning[] {
   const warnings: AdapterWarning[] = [];
   for (const [pattern, label] of DEGRADATION_PATTERNS) {
     if (!pattern.test(line)) continue;
     warnings.push({
       code: 'DEGRADED_BLOCK',
       message: `${label}已按纯文本保留`,
-      from: start,
-      to: start + line.length,
+      from: origin,
+      to: origin + line.length,
     });
   }
   return warnings;
@@ -130,7 +134,11 @@ function tokenize(text: string): Tok[] {
 
 function countRun(toks: Tok[], from: number): number {
   let length = 0;
-  while (from + length < toks.length && !toks[from + length].escaped && toks[from + length].ch === '*') {
+  while (
+    from + length < toks.length &&
+    !toks[from + length].escaped &&
+    toks[from + length].ch === '*'
+  ) {
     length += 1;
   }
   return length;
@@ -247,16 +255,6 @@ function parseInline(text: string): FlatText[] {
 // 块级解析
 // ---------------------------------------------------------------------------
 
-function splitLines(text: string): Line[] {
-  const lines: Line[] = [];
-  let offset = 0;
-  for (const raw of text.split('\n')) {
-    lines.push({ text: raw, start: offset });
-    offset += raw.length + 1;
-  }
-  return lines;
-}
-
 function parseBlocks(lines: Line[], warnings: AdapterWarning[]): PMNode[] {
   const blocks: PMNode[] = [];
   let i = 0;
@@ -288,12 +286,10 @@ function parseBlocks(lines: Line[], warnings: AdapterWarning[]): PMNode[] {
         warnings.push({
           code: 'DEGRADED_BLOCK',
           message: `${level} 级标题超出白名单（只支持 1~3 级），已按纯文本保留`,
-          from: line.start,
-          to: line.start + line.text.length,
+          from: line.origin,
+          to: line.origin + line.text.length,
         });
-        blocks.push(
-          inkstoneSchema.node('paragraph', null, toInlineNodes(parseInline(line.text))),
-        );
+        blocks.push(inkstoneSchema.node('paragraph', null, toInlineNodes(parseInline(line.text))));
       }
       i += 1;
       continue;
@@ -307,7 +303,8 @@ function parseBlocks(lines: Line[], warnings: AdapterWarning[]): PMNode[] {
         const stripped = current.text.replace(/^>[ \t]?/, '');
         collected.push({
           text: stripped,
-          start: current.start + (current.text.length - stripped.length),
+          // 剥掉 `>` 前缀后，这一行的起点要往后挪——挪的是**原文**坐标里的前缀长度
+          origin: current.origin + (current.text.length - stripped.length),
         });
         i += 1;
       }
@@ -321,7 +318,7 @@ function parseBlocks(lines: Line[], warnings: AdapterWarning[]): PMNode[] {
     // 其余一律是段落。以 `\` 开头的行也走这里：转义字符由行内 tokenize 还原，
     // 且它天然不会命中上面的块级判定。
     if (!line.text.startsWith('\\')) {
-      warnings.push(...detectDegradations(line.text, line.start));
+      warnings.push(...detectDegradations(line.text, line.origin));
     }
     blocks.push(inkstoneSchema.node('paragraph', null, toInlineNodes(parseInline(line.text))));
     i += 1;
@@ -335,9 +332,9 @@ function parseBlocks(lines: Line[], warnings: AdapterWarning[]): PMNode[] {
 // ---------------------------------------------------------------------------
 
 export function fromMd(markdown: string): FromMdResult {
-  const text = normalize(markdown);
   const warnings: AdapterWarning[] = [];
-  const blocks = parseBlocks(splitLines(text), warnings);
+  // 逐行归一化（带上原文起点），告警的偏移因此能落回**入参那份 markdown**
+  const blocks = parseBlocks(normalizeToLines(markdown), warnings);
 
   const doc = inkstoneSchema.node(
     DOC_NODE_NAME,

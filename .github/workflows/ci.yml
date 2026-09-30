@@ -1,0 +1,112 @@
+# 砚台 inkstone · 持续集成（`docs/08` §6.2）
+#
+# 两条并行 job，Node 与 Python 各一条。**只做检查、测试与构建**：
+# 不跑 `pnpm dev`、不跑 `pnpm dist:win`（那要 Python、PyInstaller 与 Windows 环境）、
+# 不装 Electron 二进制。
+#
+# ⚠️ `pnpm build` **是跑的**（node job 的最后一步）。原先以"typecheck 已覆盖编译错误"
+# 为由跳过它 —— 那句话对类型成立，但漏掉了 `electron.vite.config.ts` 里两类**只有构建
+# 才暴露**的东西：CSP 注入（dev 分支刻意不注入，所以 `pnpm dev` 下永远看不到）
+# 与 `externalizeDepsPlugin` 的漏项（错了只体现在产物里，运行时才炸）。
+# 见 `docs/13` M29。
+#
+# 为什么不直接跑 `pnpm verify`：那条命令里包含了 `sidecar:lint` / `sidecar:test`，
+# 它们要读 `services/sidecar/.venv`，而 venv 只在 python job 里存在。所以下面按
+# `verify` 的内容逐条展开，两条 job 合起来等于一次 `pnpm verify`。
+
+name: CI
+
+on: [push, pull_request]
+
+# 同一分支连续 push 时取消上一次 —— 省 CI 额度，且避免旧提交的绿灯制造错觉。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  node:
+    name: Node（lint / 格式 / 类型 / 测试）
+    runs-on: ubuntu-latest
+    env:
+      # electron 的 postinstall 会下载上百 MB 的预编译二进制，而我们的测试（vitest）
+      # 不依赖 Electron 运行时 —— 跳过它，CI 时长能省一大截。
+      ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+    steps:
+      - uses: actions/checkout@v4
+
+      # 按 docs/08 §9 的策略：pnpm 版本在这里显式钉死，而不是往 package.json 加
+      # `packageManager` —— 后者会让本机的 corepack 也按它校验，属于会改变开发机行为的
+      # 副作用。CI 与本地都用 12.x，前者固定到补丁号。
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.4.2
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: 安装依赖
+        run: pnpm install --frozen-lockfile
+
+      - name: ESLint
+        run: pnpm lint
+
+      - name: Prettier 格式检查
+        run: pnpm format:check
+
+      - name: 类型检查（三个包，各自用自己那份 TypeScript 7）
+        run: pnpm typecheck
+
+      - name: shared 测试
+        run: pnpm shared:test
+
+      - name: md-adapter 测试
+        run: pnpm md-adapter:test
+
+      # 单独一条命令而不是收进 verify：verify 里的 sidecar 步骤在这个 job 里跑不了。
+      - name: desktop 测试
+        run: pnpm --filter @inkstone/desktop test
+
+      # 唯一覆盖 `electron.vite.config.ts` 的检查（理由见文件头注）。
+      # 只 build、不打包：产出 `apps/desktop/out/` 就够，不需要 Electron 二进制，
+      # 也不需要 NSIS —— 所以能在 `ELECTRON_SKIP_BINARY_DOWNLOAD=1` 下跑。
+      - name: 构建（electron-vite build）
+        run: pnpm build
+
+  python:
+    name: Python（ruff / mypy / pytest）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: services/sidecar
+    steps:
+      - uses: actions/checkout@v4
+
+      # 用 3.12 而不是本机的 3.13：`requires-python = ">=3.12"`，CI 取下限更容易
+      # 暴露兼容问题。两边的结果都要能过。
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: services/sidecar/pyproject.toml
+
+      - name: 建 venv 并安装（含 dev extra）
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -e ".[dev]"
+
+      # 与 `pnpm sidecar:lint` 同参数（src tests 一起查）—— 本地与 CI 用同一条尺子，
+      # 否则会出现"本地过、CI 挂在测试文件的标注上"。
+      - name: ruff
+        run: .venv/bin/python -m ruff check src tests
+
+      - name: mypy --strict
+        run: .venv/bin/python -m mypy src tests
+
+      # ⚠️ 已知待观察项：`tests/test_handshake.py` 会真的 spawn 子进程，而
+      # Windows 上的 `taskkill /T /F` 分支在 Linux 不走。首次 push 后要看这条是否绿；
+      # 若失败，按 docs/08 §7 的预案加 `-k "not handshake"` 并在文档里写明原因。
+      - name: pytest
+        run: .venv/bin/python -m pytest

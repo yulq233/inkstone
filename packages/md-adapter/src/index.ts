@@ -13,9 +13,10 @@
 
 export const MD_ADAPTER_VERSION = 1;
 
-export { normalize } from './normalize';
+export { normalize, normalizeToLines } from './normalize';
 export { extractTitle, fromMd } from './from-md';
 export { toMd } from './to-md';
 export { emptyParagraph, inkstoneSchema } from './schema';
 
+export type { NormalizedLine } from './normalize';
 export type { AdapterWarning, FlatText, FromMdResult, ToMdResult } from './types';

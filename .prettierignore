@@ -1,0 +1,35 @@
+# Prettier 忽略清单（docs/08 §5）
+#
+# *.md 一律不格式化：文档里有人工排的表格与刻意换行，格式化会把它们打散。
+# 这是本清单里最重要的一条 —— 其余项都是"没必要碰的产物"。
+
+# 文档与笔记：人工排版
+*.md
+docs/
+
+# 锁文件：改了会被工具判为不一致
+pnpm-lock.yaml
+
+# 构建产物
+out/
+dist/
+release/
+*.tsbuildinfo
+
+# 依赖与 Python 环境
+node_modules/
+.venv/
+__pycache__/
+*.egg-info/
+services/sidecar/build/
+
+# 缓存与临时目录
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.pytmp/
+.vite/
+
+# 应用运行时数据
+logs/
+*.log

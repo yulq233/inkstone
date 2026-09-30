@@ -1,0 +1,148 @@
+/* 章节侧栏（步骤 04）。挂在 `.work-sidebar` 里，由它给宽度与背景。 */
+
+/* 侧栏容器自管内边距（列表项要高亮到边缘），所以接管掉 `.work-sidebar` 的 padding。
+   两个类（0,2,0）稳压 `.work-sidebar`（0,1,0）—— 不靠加载顺序。 */
+.work-sidebar.sidebar-host {
+  padding: 0;
+}
+
+.chapter-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.chapter-sidebar-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 8px;
+}
+
+/* `.slot-title` 自带 margin-bottom，在横向排列的头部里要去掉 */
+.chapter-sidebar-head .slot-title {
+  margin-bottom: 0;
+}
+
+.chapter-sidebar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chapter-sidebar-actions button {
+  padding: 3px 9px;
+  font-size: 12px;
+}
+
+.chapter-sidebar-error {
+  flex: none;
+  padding: 0 12px 8px;
+}
+
+.chapter-sidebar-error .inline-error {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.chapter-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  margin: 0;
+  padding: 0 8px 12px;
+  list-style: none;
+}
+
+.chapter-item-wrap {
+  margin: 0;
+}
+
+/* 列表项是个 button，要盖掉 global.css 的默认按钮外观（边框、白底、内边距） */
+.chapter-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: left;
+}
+
+.chapter-item:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: var(--border);
+  /* 覆盖 global.css 的 `button:hover { color: var(--accent) }` ——
+     这里变的是底色不是文字色，标题变绿会让人以为点了它 */
+  color: var(--text-muted);
+}
+
+/* 当前章：左侧竖条 + 提亮。竖条用 inset shadow 而不是 border-left，
+   否则会增加盒宽、把标题往右挤 3px，切换时整列表会横向抖一下。 */
+.chapter-item.is-current {
+  background: var(--surface);
+  border-color: var(--border-strong);
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.chapter-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 没有真标题时（空 / 未命名 / 只是序号重复）用次要色，别让它冒充章节名 */
+.chapter-label.is-muted {
+  color: var(--text-faint);
+}
+
+.chapter-words {
+  flex: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.chapter-item.is-current .chapter-words {
+  color: var(--text-muted);
+}
+
+.chapter-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+.chapter-dot.tone-revising {
+  background: var(--warn);
+}
+
+.chapter-dot.tone-done {
+  background: var(--accent);
+}
+
+.chapter-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 24px 16px;
+  text-align: center;
+}
+
+.chapter-empty p {
+  margin: 0;
+}

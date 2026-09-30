@@ -6,6 +6,8 @@ M3 的流式生成也要用 SSE，直连是天然形态。
 
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter, Request
 
 from ...storage.repo import WorkRegistry
@@ -15,7 +17,8 @@ router = APIRouter()
 
 
 def _registry(request: Request) -> WorkRegistry:
-    return request.app.state.registry
+    # 与 works.py 的 _registry 同理：``app.state`` 是 Any，cast 是声明式的收敛。
+    return cast(WorkRegistry, request.app.state.registry)
 
 
 @router.get("/works/{work_id}/chapters/{chapter_id}")

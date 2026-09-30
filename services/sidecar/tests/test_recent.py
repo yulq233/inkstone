@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import shutil
 import sys
@@ -15,8 +16,28 @@ import pytest
 from fastapi.testclient import TestClient
 
 from inkstone.storage.recent import MAX_ENTRIES, RecentStore
+from inkstone.storage.repo import WorkRegistry
 
 RECENT = "/api/v1/works/recent"
+
+
+def test_recent_is_async_and_recent_entries_stays_synchronous() -> None:
+    """`recent()` 的 `async` 是**对外承诺**；同步入口只留给"已经在线程池里"的调用方。
+
+    `docs/13` M7 的根因就是有人把同步版（要读 `recent-works.json`、还要对每条记录
+    stat 一次）直接放进了 async 路由 —— 外置盘上会让整个 sidecar 在那段时间里
+    对所有请求无响应。
+
+    两个方法并列而不是藏一个私有实现，是为了让"哪个是给事件循环用的"一眼可辨。
+    这条断言把那个区分钉住：谁把 `recent()` 改回同步、或把 `recent_entries()`
+    改成 async，这里都会红。
+
+    （真正的回归网是 `test_works_api.py` —— 路由漏掉 `await` 时，
+    FastAPI 会拿一个 coroutine 去序列化，那一组用例必然红。）
+    """
+    assert asyncio.iscoroutinefunction(WorkRegistry.recent)
+    assert asyncio.iscoroutinefunction(WorkRegistry.remove_recent)
+    assert not asyncio.iscoroutinefunction(WorkRegistry.recent_entries)
 
 
 def _recent(client: TestClient, headers: dict[str, str]) -> list[dict]:
@@ -104,23 +125,23 @@ def test_case_insensitive_dedupe_on_windows(tmp_path: Path) -> None:
     store = RecentStore(tmp_path)
     store.touch(root_path=str(tmp_path / "novel"), title="Novel")
     store.touch(root_path=str(tmp_path / "NOVEL"), title="Novel")
-    assert len(store.list()) == 1
+    assert len(store.list_entries()) == 1
 
 
 def test_store_caps_growth(tmp_path: Path) -> None:
     store = RecentStore(tmp_path)
     for index in range(MAX_ENTRIES + 5):
         store.touch(root_path=str(tmp_path / f"book-{index}"), title=f"book-{index}")
-    assert len(store.list()) == MAX_ENTRIES
+    assert len(store.list_entries()) == MAX_ENTRIES
 
 
 def test_corrupted_store_degrades_to_empty(tmp_path: Path) -> None:
     (tmp_path / "recent-works.json").write_text("{ 这不是 JSON", encoding="utf-8")
     store = RecentStore(tmp_path)
-    assert store.list() == []
+    assert store.list_entries() == []
     # 而且要能继续正常写入，不能因为坏文件就永久瘫痪。
     store.touch(root_path=str(tmp_path / "新书"), title="新书")
-    assert len(store.list()) == 1
+    assert len(store.list_entries()) == 1
 
 
 def test_entries_without_root_path_are_skipped(tmp_path: Path) -> None:
@@ -128,4 +149,4 @@ def test_entries_without_root_path_are_skipped(tmp_path: Path) -> None:
         json.dumps({"schemaVersion": 1, "items": [{"title": "没有路径"}, "字符串"]}),
         encoding="utf-8",
     )
-    assert RecentStore(tmp_path).list() == []
+    assert RecentStore(tmp_path).list_entries() == []

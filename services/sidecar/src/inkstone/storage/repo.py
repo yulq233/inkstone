@@ -7,6 +7,9 @@
 - 同一章节的写入用**进程内 ``asyncio.Lock`` per chapterId** 串行化。
   两个并发 PUT 可能乱序落盘，导致"先到的旧内容覆盖后到的新内容"。
 - 章节清单的重建与新建用 per-work 锁，避免两处同时重排目录名。
+- **章节写入同时占 work 锁与 chapter 锁**（顺序固定 work → chapter）：只占
+  chapter 锁时，"写第 5 章"与"在第 2 章后插入新章（会把第 5 章重排成第 6 章）"
+  会打架，让写入落进已经改名的旧目录、把它复活成重复章节（`docs/13` M6）。
 - 阻塞的文件 IO 一律丢进 ``anyio.to_thread``，不占事件循环。
 """
 
@@ -39,17 +42,24 @@ from ..domain.paths import (
     parse_chapter_dirname,
     slugify,
 )
-from ..domain.work import WorkMeta, needs_rewrite, parse_work_meta
 from ..domain.wordcount import count_words_default
+from ..domain.work import WorkMeta, needs_rewrite, parse_work_meta
 from ..errors import (
     ChapterNotFound,
     DomainError,
     InvalidParam,
+    NotUtf8,
     WorkExists,
     WorkNotFound,
     WriteFailed,
 )
-from .atomic import atomic_write_bytes, atomic_write_text, cleanup_stale_tmp, content_hash, read_bytes
+from .atomic import (
+    atomic_write_bytes,
+    atomic_write_text,
+    cleanup_stale_tmp,
+    content_hash,
+    read_bytes,
+)
 from .recent import RecentStore
 
 logger = logging.getLogger("inkstone.repo")
@@ -123,6 +133,25 @@ class WorkRegistry:
             raise WorkNotFound(work_id)
         return ctx
 
+    def work_paths(self, work_id: str) -> WorkPaths:
+        """取一部作品的路径。给**只读的旁路使用者**（AI 装配器）用的公开入口。
+
+        不把 `_get()` 暴露出去：`WorkContext` 里持有可变的章节缓存，
+        交给仓储之外的人等于把"谁能改缓存"这条边界拆掉。这里只借出 `WorkPaths`
+        ——它是不可变的（`__slots__` 只有一个 root），借出去也没有副作用。
+        """
+        return self._get(work_id).paths
+
+    def chapter_ids_sync(self, work_id: str) -> set[str]:
+        """章节 id 全集（同步版）—— 给同样在 ``to_thread`` 里跑的旁路存储用
+        （章纲：PUT 校验章节存在、伏笔聚合标孤儿）。
+
+        ``list_chapters`` 是 async 的（给路由层），在 to_thread 的同步上下文里
+        没法 await 它；而这里只读 `_ensure_chapters` 的缓存结果，无新增副作用。
+        """
+        ctx = self._get(work_id)
+        return {record.id for record in self._ensure_chapters(ctx)}
+
     def _ensure_chapters(self, ctx: WorkContext, *, force: bool = False) -> list[ChapterRecord]:
         try:
             mtime = ctx.paths.manuscript_dir.stat().st_mtime
@@ -156,7 +185,10 @@ class WorkRegistry:
             parsed = parse_chapter_dirname(entry.name)
             if parsed is None:
                 # 用户可能在目录里放了别的东西。忽略但留痕，不报错中断整个列表。
-                logger.warning("忽略无法解析的章节目录", extra={"extra_fields": {"name": entry.name}})
+                logger.warning(
+                    "忽略无法解析的章节目录",
+                    extra={"extra_fields": {"name": entry.name}},
+                )
                 continue
             order, slug = parsed
             try:
@@ -169,7 +201,9 @@ class WorkRegistry:
         records.sort(key=lambda r: r.order)
         return records
 
-    def _scan_one(self, ctx: WorkContext, chapter_dir: Path, *, order: int, slug: str) -> ChapterRecord:
+    def _scan_one(
+        self, ctx: WorkContext, chapter_dir: Path, *, order: int, slug: str
+    ) -> ChapterRecord:
         md_path = chapter_dir / CHAPTER_MD
         meta_path = chapter_dir / CHAPTER_META
 
@@ -198,7 +232,7 @@ class WorkRegistry:
     def _load_or_heal_meta(self, meta_path: Path, order: int) -> ChapterMeta:
         if meta_path.is_file():
             try:
-                return parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+                return parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8-sig")))
             except (OSError, json.JSONDecodeError, InvalidParam) as exc:
                 # 用户在外部把 meta.json 改坏了：不要连累整部作品打不开，
                 # 重建一个（id 会变，这是可接受的代价，并会在日志里留下痕迹）。
@@ -214,7 +248,7 @@ class WorkRegistry:
         if not md_path.is_file():
             return TITLE_FALLBACK, 0
         try:
-            with md_path.open("r", encoding="utf-8") as f:
+            with md_path.open("r", encoding="utf-8-sig") as f:
                 first_line = f.readline()
             title = title_from_first_line(first_line) or TITLE_FALLBACK
         except (OSError, UnicodeDecodeError) as exc:
@@ -230,7 +264,7 @@ class WorkRegistry:
 
         # 缓存缺失（首次扫描、外部新建的章）才整文件读一次，读完就写回缓存。
         try:
-            text = md_path.read_text(encoding="utf-8")
+            text = md_path.read_text(encoding="utf-8-sig")
         except (OSError, UnicodeDecodeError):
             return title, 0
         return title, count_words_default(text)
@@ -306,7 +340,7 @@ class WorkRegistry:
             raise WorkNotFound(root_path)
 
         try:
-            raw = json.loads(work_json.read_text(encoding="utf-8"))
+            raw = json.loads(work_json.read_text(encoding="utf-8-sig"))
         except json.JSONDecodeError as exc:
             raise InvalidParam(f"work.json 不是合法的 JSON：{exc.msg}") from exc
         except OSError as exc:
@@ -330,11 +364,34 @@ class WorkRegistry:
         logger.info("已打开作品", extra={"extra_fields": {"workId": meta.id, "root": str(root)}})
         return self._summary(ctx)
 
-    def recent(self) -> list[dict[str, Any]]:
-        return self._recents.list()
+    def recent_entries(self) -> list[dict[str, Any]]:
+        """同步读最近作品列表。**只给"已经在线程池里"的调用方**（`app.py::_recent_roots`）。
 
-    def remove_recent(self, root_path: str) -> bool:
-        return self._recents.remove(root_path)
+        那个函数是被 `UsageLedger.today()` 丢进线程池跑的，在线程里没法 `await`；
+        而那一层**必须**丢线程 —— 否则每次生成之前都会在事件循环里阻塞一次磁盘读
+        （`docs/13` M7）。
+
+        刻意与 `recent()` 并列，而不是藏一个私有实现：让"哪个是给事件循环用的"
+        一眼可辨。这次审查的根因正是有人把同步版直接放进了 async 路由。
+        """
+        return self._recents.list_entries()
+
+    async def recent(self) -> list[dict[str, Any]]:
+        """最近作品列表。**`async` 是对外承诺**：它不会再阻塞事件循环。
+
+        `list_entries()` 要读 `recent-works.json`，并对每条记录做一次
+        `Path.is_file()`（最多 `MAX_ENTRIES`=20 次 stat）—— 在外置盘/网络盘上
+        就是几十毫秒，放在事件循环里意味着这段时间内 sidecar 对所有请求无响应。
+        """
+        return await anyio.to_thread.run_sync(self.recent_entries)
+
+    async def remove_recent(self, root_path: str) -> bool:
+        """从最近列表移除一条（**会写盘**：`RecentStore.remove` → `atomic_write_text`）。
+
+        写的路径上有 `time.sleep` 重试（`atomic.py` 的 `_RETRY_DELAYS`，最多 0.3 秒）——
+        那一段是**纯阻塞**的，在事件循环里跑等于把整个服务冻住。
+        """
+        return await anyio.to_thread.run_sync(self._recents.remove, root_path)
 
     def _summary(self, ctx: WorkContext) -> dict[str, Any]:
         chapters = ctx.chapters or []
@@ -399,12 +456,13 @@ class WorkRegistry:
                 renamed.append((record, src, dst))
         except OSError as exc:
             # 回滚已改的部分，让磁盘回到调用前的样子 —— 半成品状态比失败更难查。
-            for record, src, dst in reversed(renamed):
+            for _record, src, dst in reversed(renamed):
                 with suppress(OSError):
                     dst.rename(src)
             raise DomainError(
                 "INTERNAL",
-                "章节插入失败：重排目录时出错，已回滚。请检查 manuscript 目录是否有同名目录被占用。",
+                "章节插入失败：重排目录时出错，已回滚。"
+                "请检查 manuscript 目录是否有同名目录被占用。",
                 detail={"reason": str(exc)},
             ) from exc
 
@@ -412,8 +470,12 @@ class WorkRegistry:
         for record, _src, dst in renamed:
             record.order += 1
             meta_path = dst / CHAPTER_META
-            with suppress(OSError):
-                meta = parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+            # 同步失败不影响正确性（下次扫描时 `_scan_one` 会按目录名把 order 对齐回来）。
+            # 但**必须连 JSON 损坏一起吞掉**：只 `suppress(OSError)` 的话，meta.json 坏掉时
+            # `JSONDecodeError`/`InvalidParam` 会一路逃逸成 500 —— 而此刻目录已经重排完、
+            # 新章节还没建，正是"半成品状态比失败更难查"的那种场景。
+            with suppress(OSError, json.JSONDecodeError, InvalidParam):
+                meta = parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8-sig")))
                 meta.order = record.order
                 self._try_write_meta(meta_path, meta)
 
@@ -465,7 +527,15 @@ class WorkRegistry:
             # 目录还在但正文被删了。当成空内容继续，保存时会把它写回来。
             raw = b""
 
-        markdown = raw.decode("utf-8", errors="replace")
+        try:
+            # **严格**解码（`utf-8-sig` 只是顺带容忍一个 BOM，仍然拒绝其它编码）。
+            # 绝不能退回 `errors="replace"`：解不出来的字节会变成 U+FFFD，而保存时按
+            # UTF-8 回写 —— 原稿字节被永久破坏；且下面的 `hash` 算的是**原始字节**，
+            # 那份替换后的文本回存时哈希对得上，冲突检测拦不住（详见 `NotUtf8`）。
+            markdown = raw.decode("utf-8-sig")
+        except UnicodeDecodeError as exc:
+            raise NotUtf8(str(md_path)) from exc
+
         word_count = count_words_default(markdown)
         if record.word_count != word_count:
             self._cache_word_count(ctx, record, word_count)
@@ -490,8 +560,23 @@ class WorkRegistry:
         backup: bool = False,
     ) -> dict[str, Any]:
         ctx = self._get(work_id)
-        # 同一章节的写入必须串行：两个并发 PUT 可能乱序落盘，旧内容盖掉新内容。
-        async with self._chapter_lock(chapter_id):
+        # 两层锁都要，缺一不可（`docs/13` M6）：
+        #
+        # 1. **work 锁**：`create_chapter` 会**重排章节目录名**（`002-x` → `003-x`）。
+        #    写入若不同时占着 work 锁，这条竞态就能让 `_write_chapter_sync` 拿着旧 order
+        #    算出的路径去落盘 —— 而 `atomic_write_bytes` 会把父目录建出来，
+        #    于是刚被改走的老目录**原地复活**，作品里出现两个 order 相同的目录。
+        #    已复现：`tests/test_repo_locks.py` 把落盘那一步卡住再插入一章，
+        #    修复前 `manuscript/` 扫出 `[1, 2, 2, 3]`（多出来的 `2` 就是复活的目录）。
+        # 2. **chapter 锁**：两个并发 PUT 同一章可能乱序落盘，旧内容盖掉新内容。
+        #
+        # 获取顺序**固定为 work → chapter**（`async with A, B` 就是先 A 后 B）：
+        # `create_chapter` 只拿 work 锁、从不拿 chapter 锁，所以不存在"先 chapter 后 work"
+        # 的路径 —— 顺序一致即无死锁。
+        async with (
+            self._work_lock(work_id),
+            self._chapter_lock(chapter_id),
+        ):
             return await anyio.to_thread.run_sync(
                 self._write_chapter_sync, ctx, chapter_id, markdown, base_hash, backup
             )
@@ -522,6 +607,10 @@ class WorkRegistry:
                 "这个章节的文件已被外部修改，你的改动没有保存。",
                 detail={
                     "diskHash": disk_hash,
+                    # 这里是**展示给冲突对话框看的**，用 `errors="replace"` 是有意的：
+                    # 即便磁盘那份不是 UTF-8（GBK 等），也要让对话框能弹出来、让用户看到
+                    # 发生了什么。真正禁止"静默改坏"的是 `read_chapter` 的严格解码 ——
+                    # 那份内容压根进不了编辑器，走不到这里。
                     "diskMarkdown": disk.decode("utf-8", errors="replace"),
                     "diskSavedAt": _mtime_iso(md_path) if disk_exists else None,
                 },
@@ -583,7 +672,7 @@ class WorkRegistry:
             record.title = title
         meta_path = ctx.paths.chapter_meta(record.order, record.slug)
         try:
-            meta = parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8")))
+            meta = parse_chapter_meta(json.loads(meta_path.read_text(encoding="utf-8-sig")))
         except (OSError, json.JSONDecodeError, InvalidParam):
             meta = ChapterMeta(id=record.id, order=record.order, status=record.status)
         meta.word_count_cache = word_count

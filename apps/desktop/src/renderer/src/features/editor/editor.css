@@ -1,0 +1,429 @@
+/* ProseMirror 不带任何样式（`05` 坑 #9）—— 段落会挤成一坨、空段落没有高度。 */
+
+:root {
+  /* 正文的初值。**必须与 `packages/shared/src/settings.ts` 的 FONT_SIZE.fallback /
+     LINE_HEIGHT.fallback 一致**（16 / 1.8）：渲染进程一挂载就用内联变量覆盖这两个值，
+     两边不一致的话，用户会看到一次肉眼可见的字号跳变。
+     这两个变量只作用在 `.ProseMirror` 上 —— 用户调的是"读稿子的舒适度"，
+     不是整个界面的缩放（`09` §3.3）。 */
+  --editor-font-size: 16px;
+  --editor-line-height: 1.8;
+  --editor-measure: 42em;
+  /* 切章遮罩的底色由 global.css 给（它跟 --bg 一起翻主题），这里不再重复声明，
+     否则 :root 上的同名声明谁赢要看两个 CSS 文件的加载顺序 —— 那种胜负太脆。 */
+}
+
+/* 坑 #8：global.css 的 `body { user-select: none }` 会让编辑器里一个字都选不中，
+   而选区是 ProseMirror 的核心机制 —— 必须在这里改回来。 */
+.inkstone-editor {
+  user-select: text;
+}
+
+.editor-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  /* 切章遮罩的定位上下文 */
+  position: relative;
+}
+
+/* 滚动条挂在挂载容器上；`.ProseMirror` 只负责自身宽度与内边距。
+   刻意不用 flex 居中：TipTap 的 EditorContent 会在中间多套一层 div，
+   针对那层的 flex 规则会随它内部结构变化而失效。 */
+.inkstone-editor {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.inkstone-editor .ProseMirror {
+  max-width: var(--editor-measure);
+  margin: 0 auto;
+  padding: 8px 4px 40vh;
+  outline: none;
+  font-size: var(--editor-font-size);
+  line-height: var(--editor-line-height);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inkstone-editor .ProseMirror p {
+  margin: 0 0 0.9em;
+}
+
+.inkstone-editor .ProseMirror h1 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin: 1.2em 0 0.6em;
+}
+
+.inkstone-editor .ProseMirror h2 {
+  font-size: 1.3em;
+  font-weight: 600;
+  margin: 1.1em 0 0.5em;
+}
+
+.inkstone-editor .ProseMirror h3 {
+  font-size: 1.15em;
+  font-weight: 600;
+  margin: 1em 0 0.5em;
+}
+
+/* 中文小说的排版靠留白，不靠装饰 —— 引用不给引号，标题不加下划线。 */
+.inkstone-editor .ProseMirror blockquote {
+  border-left: 3px solid var(--border-strong);
+  padding-left: 1em;
+  margin: 0 0 0.9em;
+  color: var(--text-muted);
+}
+
+.inkstone-editor .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--border-strong);
+  margin: 1.6em 0;
+}
+
+/* 空段落也要有高度，否则"新起一段"时看不到光标在哪 */
+.inkstone-editor .ProseMirror p:empty::after,
+.inkstone-editor .ProseMirror h1:empty::after,
+.inkstone-editor .ProseMirror h2:empty::after,
+.inkstone-editor .ProseMirror h3:empty::after {
+  content: '';
+  display: inline-block;
+}
+
+.inkstone-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--text-faint);
+  float: left;
+  height: 0;
+  pointer-events: none;
+}
+
+.editor-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 32px;
+}
+
+.editor-placeholder p {
+  margin: 0;
+}
+
+.wordcount-bar {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  background: var(--surface);
+}
+
+.wordcount-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text);
+}
+
+/* 切章遮罩。绝对定位盖住整个编辑面板（含告警条与字数条），
+   所以它连同 `.ProseMirror` 一起挡掉鼠标与键盘焦点 —— 见 EditorPane 里的注释：
+   不挡住的话，用户在切章途中敲的字会落进正在被切走的旧章，然后被整体替换掉。 */
+.editor-mask {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--editor-mask-bg);
+}
+
+/* 通知条：切章被中断时的一句话 + 「知道了」 */
+.shell-notice {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.shell-notice-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* 降级告警条：常驻横幅，可折叠但不可忽略（05 §7） */
+.adapter-warnings {
+  flex: none;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warn-soft);
+  color: var(--warn);
+  font-size: 12px;
+}
+
+.adapter-warnings-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.adapter-warnings-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.adapter-warnings-list {
+  margin: 8px 0 0;
+  padding-left: 20px;
+  max-height: 180px;
+  overflow: auto;
+  line-height: 1.7;
+}
+
+.adapter-warnings-list li {
+  margin-bottom: 4px;
+}
+
+.adapter-warnings-list code {
+  display: block;
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+  opacity: 0.85;
+  word-break: break-all;
+  user-select: text;
+}
+
+.linkish {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.linkish:hover:not(:disabled) {
+  border-color: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   保存状态与冲突（步骤 03）
+   --------------------------------------------------------------------------- */
+
+/* 编辑区容器：错误条（可选）+ 编辑面板。
+   这里必须**接管** `work-content` 的滚动与内边距：内层编辑器自己滚，
+   外层再滚一层就会出现两根滚动条，而且 `height: 100%` 的编辑面板一旦多出一条错误条
+   就会被顶出可视范围。选择器写成两个类（0,2,0）是为了稳压住 global.css 里的
+   `.work-content`（0,1,0）—— 靠加载顺序决定胜负太脆。 */
+.work-content.editor-host {
+  padding: 0;
+  overflow: hidden;
+}
+
+.editor-stack {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 在 flex 列里改用 flex:1 分配剩余空间，覆盖掉 `.editor-pane` 的 `height: 100%` */
+.editor-stack > .editor-pane {
+  height: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+/* 状态指示永远可见（§5）—— 它是用户对"我的稿子在不在"的唯一依据 */
+.save-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+button.save-status {
+  cursor: pointer;
+}
+
+.save-status.tone-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+.save-status.tone-danger {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+.save-status-label {
+  font-weight: 500;
+}
+
+.save-status-hint {
+  color: var(--text-faint);
+}
+
+.save-status.tone-warn .save-status-hint,
+.save-status.tone-danger .save-status-hint {
+  color: inherit;
+  opacity: 0.75;
+}
+
+.save-status-pulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: save-pulse 1s ease-in-out infinite;
+}
+
+@keyframes save-pulse {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.backup-notice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 480px;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--info-soft);
+  color: var(--info);
+  font-size: 12px;
+}
+
+.backup-notice-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-notice code {
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+
+.save-error-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.save-error-mark {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.save-error-text {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ---- 冲突对话框 ----
+
+   `.modal-backdrop` / `.modal` 两个**原语**已挪到 `styles/global.css`：
+   入口页的「新建作品」也要用它们，而 entry 页并不保证加载到本文件
+   （现在能加载只是因为 `App → WorkShell → EditorPane` 是静态导入链）。
+   这里只留冲突框自己的样式。
+*/
+
+.conflict-dialog h2 {
+  margin: 0 0 6px;
+  font-size: 16px;
+}
+
+.conflict-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.conflict-dialog h3 {
+  margin: 0 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.conflict-dialog .actions {
+  justify-content: flex-end;
+}
+
+.conflict-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 14px 0;
+}
+
+.conflict-column {
+  min-width: 0;
+}
+
+/* 预览是正文不是代码：字体要跟正文一致，否则看起来像"日志" */
+.conflict-preview {
+  margin: 0;
+  padding: 10px 12px;
+  max-height: 220px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.conflict-notes {
+  margin: 12px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.conflict-notes strong {
+  color: var(--text);
+}

@@ -49,6 +49,25 @@ def register_secrets(values: Iterable[str]) -> None:
     _SECRETS = tuple(v for v in values if v and len(v) >= _MIN_SECRET_LEN)
 
 
+def add_secrets(values: Iterable[str]) -> None:
+    """**追加**需要按值擦除的明文，不影响已登记的。
+
+    与 `register_secrets` 的区别只在"是否覆盖"。需要它是因为两条调用链的来源不同：
+    启动时登记的是本地 token（一次性、权威），而 AI 的 API Key 是**运行中**随配置推来的
+    （`ai/state.py`）。用 `register_secrets` 会让后推的 Key 把 token 从擦除表里挤掉 ——
+    而"token 出现在日志里"正是这个模块最不能忍的事。
+
+    被撤下的旧 Key **故意留在表里**：它可能还留在日志文件的历史行、或某个库的
+    异常消息里，继续按值擦除比"精确回收"有用得多。
+    """
+    global _SECRETS
+    merged = list(_SECRETS)
+    for value in values:
+        if value and len(value) >= _MIN_SECRET_LEN and value not in merged:
+            merged.append(value)
+    _SECRETS = tuple(merged)
+
+
 def _normalize_key(key: str) -> str:
     """token / x_inkstone_token / X-Inkstone-Token 归一到同一形态。"""
     return key.strip().lower().replace("_", "-")

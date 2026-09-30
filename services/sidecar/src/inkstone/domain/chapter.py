@@ -51,14 +51,18 @@ class ChapterMeta(BaseModel):
     @classmethod
     def _check_version(cls, value: int) -> int:
         if value != SUPPORTED_SCHEMA_VERSION:
-            raise ValueError(f"不支持的 meta.json 版本 {value}，当前只认 {SUPPORTED_SCHEMA_VERSION}。")
+            raise ValueError(
+                f"不支持的 meta.json 版本 {value}，当前只认 {SUPPORTED_SCHEMA_VERSION}。"
+            )
         return value
 
     @field_validator("status")
     @classmethod
     def _check_status(cls, value: str) -> str:
         if value not in CHAPTER_STATUSES:
-            raise ValueError(f"未知的章节状态 {value!r}，可选：{'/'.join(sorted(CHAPTER_STATUSES))}。")
+            raise ValueError(
+                f"未知的章节状态 {value!r}，可选：{'/'.join(sorted(CHAPTER_STATUSES))}。"
+            )
         return value
 
     def to_json(self) -> str:

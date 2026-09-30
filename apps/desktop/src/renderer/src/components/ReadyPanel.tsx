@@ -14,6 +14,10 @@ interface ReadyPanelProps {
   probing: boolean;
   onProbe: () => void;
   onDevCrash: () => void;
+  /** 从入口页进来时提供返回；为 undefined 时本页就是顶层 */
+  onBack?: () => void;
+  /** 代理绕过诊断（04 文档 §6.4）：报障时用来一眼排除"系统代理截走了 loopback" */
+  proxyNote?: string;
 }
 
 export function ReadyPanel({
@@ -23,6 +27,8 @@ export function ReadyPanel({
   probing,
   onProbe,
   onDevCrash,
+  onBack,
+  proxyNote,
 }: ReadyPanelProps) {
   const uptimeSec = probe?.uptimeMs !== undefined ? Math.round(probe.uptimeMs / 1000) : null;
 
@@ -30,10 +36,10 @@ export function ReadyPanel({
     <div className="center-stage">
       <div className="card">
         <div className="row" style={{ marginBottom: 8 }}>
-          <h1>本地服务已就绪</h1>
-          <span className="pill ok">M0 · 批次 A</span>
+          <h1>本地服务诊断</h1>
+          <span className="pill ok">M0</span>
         </div>
-        <p>进程编排已跑通。写作界面从批次 B 开始。</p>
+        <p>写作界面正在按步骤接入；这一页用来确认本地服务与代理绕过的状态。</p>
 
         <dl className="kv">
           <dt>桌面版本</dt>
@@ -52,6 +58,7 @@ export function ReadyPanel({
           <li>每 5 秒探活，连续 3 次失败自动重启，退避 1s / 2s / 4s</li>
           <li>退出时先走 HTTP 优雅关闭，超时再强杀</li>
           <li>父进程消失时 sidecar 靠 stdin EOF 自行退出，不留孤儿进程</li>
+          {proxyNote ? <li>{proxyNote}</li> : null}
         </ul>
 
         <div className="actions">
@@ -61,6 +68,11 @@ export function ReadyPanel({
           {info && !info.isPackaged ? (
             <button type="button" onClick={onDevCrash}>
               模拟崩溃（验证自愈）
+            </button>
+          ) : null}
+          {onBack ? (
+            <button type="button" onClick={onBack}>
+              返回作品入口
             </button>
           ) : null}
         </div>

@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { app } from 'electron';
+import { logsDirPath } from '../paths';
 
 /** sidecar 的 Python 模块名（`python -m inkstone`） */
 const SIDECAR_MODULE = 'inkstone';
@@ -46,7 +47,7 @@ export function resolveVenvPython(sidecarDir = resolveSidecarDir()): string {
 }
 
 export function buildLaunchSpec(token: string): SidecarLaunchSpec {
-  const logDir = path.join(app.getPath('userData'), 'logs');
+  const logDir = logsDirPath();
   fs.mkdirSync(logDir, { recursive: true });
 
   const baseEnv: NodeJS.ProcessEnv = {
@@ -63,10 +64,16 @@ export function buildLaunchSpec(token: string): SidecarLaunchSpec {
   };
 
   if (app.isPackaged) {
-    const dir = path.join(process.resourcesPath, 'sidecar');
+    // 生产态：sidecar 由 PyInstaller 打成 --onedir，随安装包经 electron-builder 的
+    // extraResources 落到 <安装目录>/resources/sidecar/inkstone-sidecar/。
+    // 这三处路径必须与 scripts/build-sidecar.mjs、electron-builder.cjs 对齐（见 docs/10 §5）。
+    const dir = path.join(process.resourcesPath, 'sidecar', 'inkstone-sidecar');
     return {
       token,
-      command: path.join(dir, process.platform === 'win32' ? 'inkstone.exe' : 'inkstone'),
+      command: path.join(
+        dir,
+        process.platform === 'win32' ? 'inkstone-sidecar.exe' : 'inkstone-sidecar',
+      ),
       args: [],
       cwd: dir,
       env: baseEnv,

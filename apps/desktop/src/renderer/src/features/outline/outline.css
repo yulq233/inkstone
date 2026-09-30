@@ -1,0 +1,333 @@
+/* ---------------------------------------------------------------------------
+   大纲面板（docs/15 B4）
+
+   只用 `global.css` 的主题变量，不新增色板 —— 与 codex.css / ai-panel.css 同一条
+   约束。不用 `--radius-sm`（既有未定义变量）。类名 `outline-*` 前缀，避免与
+   codex-* 冲突（两者同挂侧栏，样式隔离靠前缀）。
+--------------------------------------------------------------------------- */
+
+.outline-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-y: auto;
+  height: 100%;
+  min-height: 0;
+}
+
+/* 二级 tab：总纲 | 卷纲 | 章纲 | 伏笔 */
+.outline-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.outline-tab {
+  padding: 5px 10px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted, var(--fg));
+  cursor: pointer;
+  font-size: 0.85em;
+}
+
+.outline-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+.outline-tab-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.outline-error {
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: var(--surface);
+  font-size: 0.9em;
+}
+
+.outline-empty {
+  padding: 12px 8px;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.outline-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outline-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.outline-section-title {
+  font-size: 0.85em;
+  color: var(--muted, var(--fg));
+  opacity: 0.85;
+}
+
+/* 卷纲清单 */
+.outline-list-view {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.outline-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.outline-list-item {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.outline-list-main {
+  flex: 1;
+  text-align: left;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.outline-list-name {
+  font-weight: 500;
+}
+
+.outline-list-actions {
+  display: flex;
+  gap: 2px;
+  padding-right: 4px;
+}
+
+/* 表单字段 */
+.outline-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.outline-field span {
+  font-size: 0.85em;
+  color: var(--muted, var(--fg));
+  opacity: 0.85;
+}
+
+.outline-field input,
+.outline-field select {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+/* 正文编辑器 */
+.outline-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-height: 0;
+}
+
+.outline-editor-text {
+  flex: 1;
+  min-height: 140px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+  resize: vertical;
+  font-family: inherit;
+  line-height: 1.6;
+}
+
+.outline-editor-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.outline-dirty {
+  flex: 1;
+  font-size: 0.8em;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+}
+
+.outline-save {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--bg);
+  cursor: pointer;
+}
+
+.outline-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* 伏笔清单 */
+.foreshadow-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.foreshadow-alert {
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--danger);
+  font-size: 0.9em;
+}
+
+.foreshadow-alert ul {
+  margin: 4px 0 0;
+  padding-left: 16px;
+}
+
+.foreshadow-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.foreshadow-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.foreshadow-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.foreshadow-title {
+  font-weight: 500;
+}
+
+.foreshadow-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius);
+  background: var(--danger);
+  color: var(--bg);
+  font-size: 0.75em;
+}
+
+.foreshadow-meta {
+  font-size: 0.8em;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+}
+
+.foreshadow-hint {
+  font-size: 0.8em;
+  color: var(--danger);
+}
+
+/* 章纲内的伏笔编辑 */
+.foreshadow-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.foreshadow-editor-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.foreshadow-edit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.foreshadow-edit-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.foreshadow-edit-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.foreshadow-edit-title {
+  flex: 1;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.foreshadow-edit-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+}
+
+.foreshadow-edit-field span {
+  font-size: 0.75em;
+  color: var(--muted, var(--fg));
+  opacity: 0.8;
+}
+
+.foreshadow-edit-field input,
+.foreshadow-edit-field select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}

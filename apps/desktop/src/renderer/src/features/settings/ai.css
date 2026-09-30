@@ -1,0 +1,169 @@
+/* ---------------------------------------------------------------------------
+   「设置 → AI 模型」分区
+
+   与 settings.css 同一条约束：只用 global.css 的主题变量，**不新增色板**。
+   `ai-line-ok` / `ai-line-bad` 取的是 `--accent` / `--danger` ——
+   "成功/失败"在深浅两个主题里都得有足够对比度，这件事已经在那两个变量上定过一次了。
+
+   ⚠️ 刻意不用 `--radius-sm`：它在本仓库被引用了多次却**从未定义**
+   （见 `work.css` 等处的既有用法），拿到的是 `initial` 也就是 0 圆角。
+   那是既有问题，不属于这次改动；新代码不跟着用。
+--------------------------------------------------------------------------- */
+
+.ai {
+  font-size: 13px;
+}
+
+.ai-input {
+  width: 100%;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+}
+
+.ai-input:disabled {
+  opacity: 0.6;
+}
+
+.ai-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* 输入框与它右侧的按钮同一行；输入框吃掉剩下的宽度 */
+.ai-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.ai-row > .ai-input {
+  flex: 1 1 auto;
+}
+
+.ai-row > button {
+  flex: 0 0 auto;
+}
+
+.ai-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.ai-check input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.ai-key-status {
+  margin: 0 0 8px;
+}
+
+.ai-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.ai-badge-ok {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* 结果行：一行可能很长（错误信息会带上上游报文），必须能换行 */
+.ai-line {
+  margin: 8px 0 0;
+  padding: 7px 10px;
+  border-radius: var(--radius);
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.ai-line-ok {
+  border: 1px solid var(--accent);
+  color: var(--text);
+}
+
+.ai-line-bad {
+  border: 1px solid var(--danger);
+  color: var(--text);
+}
+
+.ai-warn {
+  color: var(--danger);
+}
+
+.ai-privacy {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-muted);
+}
+
+/*
+  反馈行固定在面板可视区的底部。
+
+  为什么需要它：面板内容比视口高（AI 分区有六组），而反馈只有一个渲染位。
+  只放在顶部的话，用户滚到「密钥」那栏点保存，答案是出现在**看不见的地方**。
+  `bottom: -20px` 抵消 `.settings-panel` 的 20px 下内边距，让它真正贴住底边；
+  背景色必须给（默认透明会露出下面的内容）。
+*/
+.ai-notice {
+  position: sticky;
+  bottom: -20px;
+  margin: 14px 0 -8px;
+  background: var(--surface);
+  box-shadow: 0 -6px 12px var(--surface);
+}
+
+/*
+  「已确认外发的供应商」名单。
+
+  每行三样：名字、真实主机（`api.deepseek.com`，用户答"内容去了哪"要看的就是它）、
+  撤销按钮。主机用 `min-width: 0` + `overflow-wrap` 而不是省略号 ——
+  一个被截断的主机名等于没有这条信息，而它恰恰是这张名单存在的理由。
+*/
+.ai-ack-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-ack-list > li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--border);
+}
+
+.ai-ack-list > li:last-child {
+  border-bottom: none;
+}
+
+.ai-ack-name {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+
+/* 主机名可换行地吃掉中间空间，把「取消确认」推到行尾 */
+.ai-ack-list > li > .hint {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-ack-list > li > button {
+  flex: 0 0 auto;
+}

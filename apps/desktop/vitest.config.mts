@@ -27,5 +27,18 @@ export default defineConfig({
     dir: 'test',
     environment: 'node',
     include: ['**/*.test.ts'],
+    /**
+     * 只放行 `global.css` 走正常的 Vite 管线。
+     *
+     * Vitest 默认会把**所有** CSS 请求的模块内容替换成 `''`，判定正则是
+     * `/\.(css|…)(?:$|\?)/` —— `global.css?raw` 也落在里面。于是
+     * `test/settings.test.ts` 里那条"`WINDOW_BG` 必须与 `global.css` 的 `--bg` 同值"
+     * 拿到空串，断言永远失败（**失败信息是 `expected '' to contain`，看着像路径写错了**）。
+     *
+     * 放行之后 Vite 自己的 `vite:css` 会跳过带 `raw` 查询串的请求，`?raw` 拿到的就是
+     * 文件原文。**刻意不写 `css: true`** 全量放行：实测那会让这个包的测试从 ~1.4s
+     * 涨到 ~7s（每个模块都要过 CSS 插件链），而这里只需要一个文件。
+     */
+    css: { include: [/global\.css/] },
   },
 });

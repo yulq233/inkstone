@@ -7,7 +7,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { ALLOWED_MARK_NAMES, DOC_NODE_NAME, TEXT_NODE_NAME } from '@inkstone/shared';
+import { DOC_NODE_NAME, TEXT_NODE_NAME } from '@inkstone/shared';
 import type { Extensions } from '@tiptap/core';
 
 import {
@@ -43,10 +43,23 @@ describe('编辑器扩展集与白名单一致', () => {
   it('生效的节点与标记恰好等于白名单', () => {
     const { nodes, marks } = describeExtensionSchema(createEditorExtensions());
 
+    // ⚠️ 这里的清单**有意手抄**，不用 shared 的 `ALLOWED_BLOCK_NODES` /
+    // `ALLOWED_MARK_NAMES` 真源 —— 生产侧那条断言（`assertExtensionsMatchWhitelist`）
+    // 已经拿真源比过了，这里再比一遍真源只会重复它、不会多查任何东西。
+    // 手抄的增量在另一边：它还能抓住「**两边一起改**」—— 真源与编辑器同时加了
+    // 一个节点时，生产断言恰好通过，只有这份冻结清单会失败，逼你回到
+    // editor-extensions.ts 头注那句「新增扩展 = 新增白名单语法，还要同步序列化与往返测试」。
     expect(nodes).toEqual(
-      ['blockquote', DOC_NODE_NAME, 'heading', 'horizontalRule', 'paragraph', TEXT_NODE_NAME].sort(),
+      [
+        'blockquote',
+        DOC_NODE_NAME,
+        'heading',
+        'horizontalRule',
+        'paragraph',
+        TEXT_NODE_NAME,
+      ].sort(),
     );
-    expect(marks).toEqual([...ALLOWED_MARK_NAMES].sort());
+    expect(marks).toEqual(['bold', 'italic']);
   });
 
   it('白名单外的扩展一个都没加载', () => {

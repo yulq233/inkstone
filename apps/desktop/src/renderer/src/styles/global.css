@@ -1,3 +1,17 @@
+/* ---------------------------------------------------------------------------
+   主题变量（步骤 06）
+   渲染进程按用户的主题设置往 <html> 上写 `data-theme`：`light` / `dark`，
+   或者**不写**（= 跟随系统，交给下面的媒体查询）。
+
+   ⚠️ 深色这一套在**两个地方**重复（`09` §3.2 明确接受）：显式 `data-theme='dark'`
+   与媒体查询兜底。CSS 自定义属性没法复用选择器，而为了消掉这份重复去引 PostCSS
+   mixin，复杂度大于维护成本 —— 两块相邻，改一处时必然看到另一处。
+   浅色那一套只在 `:root`，改它不用管别处。
+
+   ⚠️ `main/store/settings.ts` 的 `WINDOW_BG` 硬编码了 `--bg` 的两个值（原生窗口
+   建出来时的铺底底色，必须与这里同值，否则启动会闪一下）。改 `--bg` 时一起改。
+--------------------------------------------------------------------------- */
+
 :root {
   --bg: #faf9f7;
   --surface: #ffffff;
@@ -17,10 +31,38 @@
   --danger-soft: #fcebeb;
   --radius: 10px;
   --radius-lg: 14px;
+  /* 切章遮罩的底色：要与 --bg 同系，才像"这一块在加载"而不是"多了一块板子"。
+     半透明值没法用 var() 拼出来（要在 --bg 上盖一层），所以它得跟着 --bg 一起翻。 */
+  --editor-mask-bg: rgba(250, 249, 247, 0.78);
 }
 
+/* 显式深色：属性选择器优先于下面的媒体查询 */
+:root[data-theme='dark'] {
+  --bg: #1c1b19;
+  --surface: #262523;
+  --surface-2: #302f2c;
+  --text: #f1efe8;
+  --text-muted: #b4b2a9;
+  --text-faint: #888780;
+  --border: #3a3936;
+  --border-strong: #4a4945;
+  --accent: #5dcaa5;
+  --accent-soft: #085041;
+  --info: #85b7eb;
+  --info-soft: #0c447c;
+  --warn: #fac775;
+  --warn-soft: #633806;
+  --danger: #f09595;
+  --danger-soft: #791f1f;
+  --editor-mask-bg: rgba(28, 27, 25, 0.78);
+}
+
+/* 跟随系统：**仅当没有显式指定时**生效。
+   两个 `:not()` 都要写。只排除 dark 的话，"用户显式选了浅色 + 系统是深色"会落到
+   这里拿到深色变量 —— 也就是用户明明选了浅色却被系统带跑，而这正是三态要防的 bug。
+   下面的深色块与上一块是同一份（见文件头的说明）。 */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']):not([data-theme='dark']) {
     --bg: #1c1b19;
     --surface: #262523;
     --surface-2: #302f2c;
@@ -37,6 +79,7 @@
     --warn-soft: #633806;
     --danger: #f09595;
     --danger-soft: #791f1f;
+    --editor-mask-bg: rgba(28, 27, 25, 0.78);
   }
 }
 
@@ -54,7 +97,8 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC',
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Microsoft YaHei', 'PingFang SC',
     'Noto Sans CJK SC', 'Hiragino Sans GB', sans-serif;
   font-size: 14px;
   line-height: 1.7;
@@ -276,4 +320,381 @@ button:disabled {
   content: '✓';
   color: var(--accent);
   flex: none;
+}
+
+/* ---------------------------------------------------------------------------
+   作品入口页（步骤 01）
+   复用既有 CSS 变量，不新增色板。
+--------------------------------------------------------------------------- */
+
+.entry {
+  flex: 1;
+  overflow: auto;
+  padding: 40px 32px 56px;
+}
+
+.entry-inner {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  gap: 18px;
+}
+
+.entry-head {
+  justify-content: space-between;
+  align-items: flex-end;
+  padding-bottom: 4px;
+}
+
+.entry-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.entry .card {
+  max-width: none;
+  padding: 20px 24px;
+}
+
+.section-title {
+  margin: 0 0 14px;
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.entry-section-head {
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.entry-section-head .section-title {
+  margin: 0;
+}
+
+.hint {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.inline-error {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.field-narrow {
+  max-width: 120px;
+}
+
+.field-row {
+  display: flex;
+  gap: 14px;
+}
+
+.field label {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.field input {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  width: 100%;
+}
+
+.field input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* 正文默认不可选中（避免拖动时选中界面文字），但表单必须可选可编辑 */
+input,
+textarea {
+  user-select: text;
+}
+
+.path-text {
+  font-family: ui-monospace, 'Cascadia Mono', Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+/* ---- 书架 ---- */
+
+.shelf {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px;
+}
+
+.shelf-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.shelf-card:hover {
+  border-color: var(--border-strong);
+}
+
+.shelf-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 0 12px 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  text-align: left;
+}
+
+.shelf-open:hover:not(:disabled) {
+  background: var(--surface-2);
+  color: inherit;
+  border-color: transparent;
+}
+
+/*
+  封面色块：让一格一眼看出"这是一本书"而不是一条列表项。
+  刻意**不按书名分配颜色** —— 本仓库的约定是复用既有变量、不新增色板，
+  一个中性的色块加书名首字就够了。负外边距是为了让它贴到卡片左右边缘。
+*/
+.shelf-cover {
+  align-self: stretch;
+  height: 64px;
+  margin: 0 -12px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-faint);
+  font-size: 26px;
+  line-height: 1;
+}
+
+.shelf-title {
+  align-self: stretch;
+  font-size: 13px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 与 `.path-text` 配合用：那边给等宽与省略号，这里只压字号与颜色 */
+.shelf-path {
+  align-self: stretch;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.shelf-meta {
+  align-self: stretch;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+.shelf-meta.bad {
+  color: var(--danger);
+}
+
+.shelf-forget {
+  border: none;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 6px 12px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 目录已被移动或删除：灰态 + 红色标注，且不自动清理 */
+.shelf-card.gone .shelf-cover,
+.shelf-card.gone .shelf-title,
+.shelf-card.gone .shelf-path {
+  opacity: 0.55;
+}
+
+/* ---- 空书架 ---- */
+
+.shelf-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 36px 24px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-lg);
+  text-align: center;
+}
+
+.shelf-empty .hint {
+  margin: 0;
+}
+
+/* 一条附注：书架照常显示，错误在旁边 + 一个「重试」 */
+.shelf-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/*
+  正在打开：与 `.shelf-error` 同一个位置、同一层语义（书架上方的一条状态），
+  但它不是错误 —— 不借用 `.inline-error` 的红色，免得一次正常的打开看起来像失败。
+*/
+.shelf-opening {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* 首屏唯一的主行动，给一点强调色，别让它混进一排次要按钮里 */
+.entry-new {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.entry-new:hover:not(:disabled) {
+  background: var(--surface-2);
+}
+
+/* ---------------------------------------------------------------------------
+   对话框原语（应用级）
+   原先只写在 `features/editor/editor.css` 的「冲突对话框」一节里，而入口页的
+   「新建作品」现在也要用。它能工作只是因为 `App → WorkShell → EditorPane` 是**静态**
+   导入链、`editor.css` 恰好被加载 —— 一旦有人把 `WorkShell` 换成 `lazy()`，
+   入口页的对话框会静默失去遮罩。放在这里就没有这个隐患。
+--------------------------------------------------------------------------- */
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(28, 28, 26, 0.42);
+}
+
+.modal {
+  width: min(880px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+/* 表单类对话框比冲突对照框窄：一行一行的字段拉满 880px 会很难读 */
+.modal-narrow {
+  width: min(460px, 100%);
+}
+
+.modal-head {
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.modal-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   工作台容器（步骤 01 只定骨架与插槽）
+--------------------------------------------------------------------------- */
+
+.work-shell {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.work-header {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.work-title {
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.work-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+
+.work-sidebar {
+  flex: none;
+  width: 240px;
+  padding: 14px 16px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-2);
+  overflow: auto;
+}
+
+.work-content {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  overflow: auto;
+}
+
+.slot-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-faint);
+  letter-spacing: 0.06em;
+  margin-bottom: 8px;
 }

@@ -56,7 +56,7 @@ def test_no_temp_files_left_behind_on_success(tmp_path: Path) -> None:
 
 def test_bytes_writer_keeps_exact_bytes(tmp_path: Path) -> None:
     target = tmp_path / "a.bin"
-    payload = "中文🙂\n".encode("utf-8")
+    payload = "中文🙂\n".encode()
     atomic.atomic_write_bytes(target, payload)
     assert target.read_bytes() == payload
 
@@ -72,8 +72,11 @@ def test_gives_up_with_write_failed_after_retries(
     def always_busy(*_args: object, **_kwargs: object) -> None:
         raise PermissionError(13, "文件被其他程序占用")
 
-    monkeypatch.setattr(atomic.os, "replace", always_busy)
-    monkeypatch.setattr(atomic.time, "sleep", lambda _seconds: None)
+    # 直接 patch `os` / `time` 这两个**模块对象**，不写 `atomic.os`：
+    # `atomic.os is os`，两种写法打的是同一处；而写 `atomic.os` 会踩
+    # `no_implicit_reexport`（`os` 只是 atomic.py 的 import，不是它的导出）。
+    monkeypatch.setattr(os, "replace", always_busy)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     with pytest.raises(WriteFailed) as excinfo:
         atomic.atomic_write_text(tmp_path / "a.md", "内容")
@@ -88,14 +91,14 @@ def test_retries_then_succeeds(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     real_replace = os.replace
     calls = {"n": 0}
 
-    def flaky(src: object, dst: object) -> None:
+    def flaky(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
         calls["n"] += 1
         if calls["n"] == 1:
             raise PermissionError(13, "忙")
         real_replace(src, dst)
 
-    monkeypatch.setattr(atomic.os, "replace", flaky)
-    monkeypatch.setattr(atomic.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(os, "replace", flaky)
+    monkeypatch.setattr(time, "sleep", lambda _seconds: None)
 
     target = tmp_path / "a.md"
     atomic.atomic_write_text(target, "内容")

@@ -22,3 +22,13 @@ def new_work_id() -> str:
 
 def new_chapter_id() -> str:
     return f"ch_{_short()}"
+
+
+def new_run_id() -> str:
+    """一条 AI 运行记录（`ai_run`）的 id。"""
+    return f"r_{_short()}"
+
+
+def new_foreshadow_id() -> str:
+    """一条伏笔登记的 id（`docs/15` D-5）。写入路径里给"客户端没带 id 的新伏笔"补齐。"""
+    return f"fs_{_short()}"

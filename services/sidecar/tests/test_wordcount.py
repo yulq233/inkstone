@@ -84,7 +84,11 @@ def test_symbol_and_punctuation_categories(text: str, expected: int) -> None:
 # ---------------------------------------------------------------------------
 
 _FIXTURE = (
-    Path(__file__).resolve().parents[3] / "packages" / "shared" / "fixtures" / "wordcount-cases.json"
+    Path(__file__).resolve().parents[3]
+    / "packages"
+    / "shared"
+    / "fixtures"
+    / "wordcount-cases.json"
 )
 
 

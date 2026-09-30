@@ -1,0 +1,151 @@
+/* ---------------------------------------------------------------------------
+   「设置」对话框的外壳（步骤 06 建立，P0 增加 AI 分区）
+
+   只用 global.css 里那套主题变量，**不新增色板** —— 面板本身必须跟着主题变，
+   否则"深色主题下打开一个浅色设置面板"就自相矛盾了。
+
+   z-index 刻意是 90，**低于**冲突对话框的 100（editor.css 的 `.modal-backdrop`）。
+   两者可能同时在场：冲突对话框是自动弹出的数据安全提示，把"你的稿子可能被覆盖"
+   压在"调字号"下面是不对的优先级。代价是面板可能被对话框挡住（用户以为点了没反应），
+   但这只发生在冲突对话框已经在屏幕上的时候 —— 那时对话框本身就是该看的东西。
+--------------------------------------------------------------------------- */
+
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  background: rgba(28, 28, 26, 0.42);
+}
+
+/* AI 那一栏内容更长（供应商、地址、模型、密钥、测试结果），比外观宽一些 */
+.settings-panel {
+  width: min(520px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 18px 22px 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-head h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+/* ---- 顶部分区切换 ---- */
+
+.settings-tabs {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+  padding: 7px 12px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  /* 选中态用下边框压住容器的下边框，做出"页签连着内容"的观感 */
+  margin-bottom: -1px;
+}
+
+.settings-tab[aria-selected='true'] {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settings-group {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+
+/* 分区里第一组紧贴页签，不需要再来一条分隔线 */
+.settings-body > .settings-group:first-child {
+  margin-top: 14px;
+  border-top: none;
+  padding-top: 0;
+}
+
+.settings-group h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-radios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+}
+
+.settings-radio {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-radio input {
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.settings-slider-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.settings-slider-row label {
+  font-size: 13px;
+}
+
+/* 数值跟着滑块跳，等宽数字才不会左右抖 */
+.settings-value {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.settings-panel input[type='range'] {
+  width: 100%;
+  cursor: pointer;
+  accent-color: var(--accent);
+}
+
+.settings-panel .hint {
+  margin: 6px 0 0;
+  line-height: 1.6;
+}
+
+.settings-panel .actions {
+  justify-content: flex-end;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}

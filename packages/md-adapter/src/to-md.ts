@@ -38,23 +38,37 @@ const KNOWN_MARKS: readonly string[] = MARK_ORDER;
 
 /** 明文里必须转义的字符：反斜杠本身，以及唯一有语义的星号。 */
 function escapeInline(text: string): string {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/\*/g, '\\*')
-    // 行内换行不存在（没有加载 HardBreak），真出现就当空格，至少不把两段粘成一个词。
-    .replace(/\r?\n/g, ' ');
+  return (
+    text
+      .replace(/\\/g, '\\\\')
+      .replace(/\*/g, '\\*')
+      // 行内换行不存在（没有加载 HardBreak），真出现就当空格，至少不把两段粘成一个词。
+      .replace(/\r?\n/g, ' ')
+  );
 }
 
 /**
  * 行首消歧。只在这三种"会被块级解析器抢走"的情况下加反斜杠：
  * 整行分隔线、ATX 标题、引用行。
  *
+ * ## 判断必须按"**归一化之后的样子**"做（`docs/13` M28）
+ *
+ * 本函数的输出最后还要过一遍 `normalize()`（见 `toMd` 末尾），而它会把**行尾空白剪掉**。
+ * 按原样判断的话，一个内容是 `---` + 三个空格的段落这里匹配不上 `^-{3,}$`、不加反斜杠，
+ * 到了 `normalize` 里被剪成 `---`，**下次解析就成了分隔线** ——
+ * 用户重开文件，一段正文变成了分割线，而且看不出是谁改的。
+ *
+ * 所以先算出"剪掉行尾空白之后的样子"再判。这正是 `normalize` 第 3 步的变换，
+ * 也是唯一能把一行"变成"块级标记的变换（`__x__`→`**x**` 等长，不改变行首）。
+ *
  * 刻意**不**处理"行首是反斜杠"的情况：`\\abc` 会被行内解析器还原成 `\abc`，本来就正确，
  * 再补一个反斜杠反而会多出一个字符。
  */
 function escapeLineStart(line: string): string {
-  if (line === '') return line;
-  if (/^-{3,}$/.test(line) || /^#{1,6}[ \t]/.test(line) || line.startsWith(BLOCKQUOTE_PREFIX)) {
+  const probe = line.replace(/[ \t]+$/, '');
+  if (probe === '') return line;
+  if (/^-{3,}$/.test(probe) || /^#{1,6}[ \t]/.test(probe) || probe.startsWith(BLOCKQUOTE_PREFIX)) {
+    // 反斜杠加在**原样**的那一行前面（行尾空白留给 normalize 去剪，这里不动它）
     return `\\${line}`;
   }
   return line;

@@ -51,7 +51,11 @@ function step(message) {
 function pickBasePython() {
   const tried = [];
   for (const candidate of CANDIDATES) {
-    const probe = run(candidate.command, [...candidate.args, '-c', 'import sys;print("%d.%d"%sys.version_info[:2])']);
+    const probe = run(candidate.command, [
+      ...candidate.args,
+      '-c',
+      'import sys;print("%d.%d"%sys.version_info[:2])',
+    ]);
     if (probe.status !== 0) {
       tried.push(`${candidate.command} → 不可用`);
       continue;
@@ -78,7 +82,10 @@ function pickBasePython() {
 }
 
 function pip(args) {
-  const result = spawnSync(venvPython, ['-m', 'pip', ...args], { cwd: SIDECAR_DIR, stdio: 'inherit' });
+  const result = spawnSync(venvPython, ['-m', 'pip', ...args], {
+    cwd: SIDECAR_DIR,
+    stdio: 'inherit',
+  });
   if (result.status !== 0) fail(`pip ${args.join(' ')} 失败（退出码 ${result.status}）`);
 }
 
@@ -90,11 +97,10 @@ function main() {
   } else {
     const base = pickBasePython();
     step(`使用 Python ${base.version}（${base.command}）创建虚拟环境`);
-    const created = spawnSync(
-      base.command,
-      [...base.args, '-m', 'venv', VENV_DIR],
-      { cwd: SIDECAR_DIR, stdio: 'inherit' },
-    );
+    const created = spawnSync(base.command, [...base.args, '-m', 'venv', VENV_DIR], {
+      cwd: SIDECAR_DIR,
+      stdio: 'inherit',
+    });
     if (created.status !== 0) fail(`创建虚拟环境失败（退出码 ${created.status}）`);
   }
 

@@ -10,6 +10,11 @@
  * `test/editor-extensions.test.ts` 断言。**新增扩展 = 新增白名单语法**，
  * 必须同步改 schema、序列化、往返测试 —— 这个断言就是提醒你别只改一处。
  *
+ * ⚠️ 断言比对的期望值**直接取自 `@inkstone/shared`**（`ALLOWED_BLOCK_NODES` /
+ * `ALLOWED_MARK_NAMES`），本文件不再留第二份手抄副本。原先这里写死一个
+ * `WHITELIST_BLOCK_NAMES`，看着"也在比对白名单"，但那份副本自己会跟着漂移 ——
+ * 真源改了、副本没改，断言照样通过，等于没查（`docs/13` M25）。
+ *
  * ## 与设计文档的一处偏离（已确认为文档笔误）
  *
  * §6.2 给出的扩展列表是：Document / Paragraph / Text / Bold / Italic / Blockquote /
@@ -33,14 +38,12 @@ import { Placeholder } from '@tiptap/extension-placeholder';
 import { Text } from '@tiptap/extension-text';
 import type { AnyExtension, Extensions } from '@tiptap/core';
 import {
+  ALLOWED_BLOCK_NODES,
   ALLOWED_MARK_NAMES,
   DOC_NODE_NAME,
   HEADING_LEVELS,
   TEXT_NODE_NAME,
 } from '@inkstone/shared';
-
-/** 白名单里参与 schema 的节点名（`doc` / `text` 是结构节点，单独比对）。 */
-const WHITELIST_BLOCK_NAMES: readonly string[] = ['paragraph', 'heading', 'blockquote', 'horizontalRule'];
 
 export function createEditorExtensions(placeholder = '开始写……'): Extensions {
   const extensions: Extensions = [
@@ -83,6 +86,9 @@ export function describeExtensionSchema(extensions: Extensions): {
 /**
  * 断言"编辑器扩展集 == 语法白名单"。
  *
+ * 期望值取自 shared 真源，不是本文件的副本 —— 这样"真源改了、编辑器没跟"
+ * 与"编辑器改了、真源没跟"两个方向都会当场抛错。
+ *
  * 抛出而不是 console.warn：不一致时编辑器会产生适配层解析不了的结构，
  * 而这个后果是**静默丢用户正文**。宁可让它开不起来 —— 开发态立刻发现，
  * 也好过上线后由用户来发现。
@@ -90,7 +96,8 @@ export function describeExtensionSchema(extensions: Extensions): {
 export function assertExtensionsMatchWhitelist(extensions: Extensions): void {
   const { nodes, marks } = describeExtensionSchema(extensions);
 
-  const expectedNodes = [...WHITELIST_BLOCK_NAMES, DOC_NODE_NAME, TEXT_NODE_NAME].sort();
+  // `doc` / `text` 是 ProseMirror 的结构节点，不在"块级语法"白名单里，单独补上。
+  const expectedNodes = [...ALLOWED_BLOCK_NODES, DOC_NODE_NAME, TEXT_NODE_NAME].sort();
   const expectedMarks = [...ALLOWED_MARK_NAMES].sort();
 
   assertSameSet('节点', nodes, expectedNodes);

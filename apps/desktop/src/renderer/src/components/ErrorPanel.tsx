@@ -1,6 +1,15 @@
 import type { AppInfo, SidecarStatus } from '@inkstone/shared';
 
-export function ErrorPanel({ status, info }: { status: SidecarStatus; info: AppInfo | null }) {
+export function ErrorPanel({
+  status,
+  info,
+  proxyNote,
+}: {
+  status: SidecarStatus;
+  info: AppInfo | null;
+  /** 代理绕过诊断（04 文档 §6.4）：故障页要能一眼排除"系统代理截走了 loopback" */
+  proxyNote?: string;
+}) {
   const firstLine = status.message?.split('\n')[0] ?? '未知原因';
 
   return (
@@ -14,6 +23,12 @@ export function ErrorPanel({ status, info }: { status: SidecarStatus; info: AppI
         {status.message ? <div className="logbox">{status.message}</div> : null}
         <div className="note">
           日志目录：<code>{info?.logDir ?? '（未知）'}</code>
+          {proxyNote ? (
+            <>
+              <br />
+              {proxyNote}
+            </>
+          ) : null}
           <br />
           最常见的原因是没有创建 Python 虚拟环境 —— 请在仓库根目录执行{' '}
           <code>pnpm sidecar:setup</code>，然后重启应用。

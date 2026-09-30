@@ -89,7 +89,9 @@ def read_bytes(path: Path) -> bytes:
     return Path(path).read_bytes()
 
 
-def cleanup_stale_tmp(dirs: Iterable[Path], *, max_age_seconds: float = STALE_TMP_AGE_SECONDS) -> int:
+def cleanup_stale_tmp(
+    dirs: Iterable[Path], *, max_age_seconds: float = STALE_TMP_AGE_SECONDS
+) -> int:
     """清理上次异常退出留下的临时文件，返回删除个数。
 
     只在**明确的目录集合**内扫（作品目录），不做全盘搜索。

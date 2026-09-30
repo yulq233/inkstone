@@ -12,9 +12,18 @@ export interface AdapterWarning {
   /** DEGRADED_BLOCK：整块结构被降级；UNSUPPORTED_INLINE：行内标记被忽略 */
   code: 'DEGRADED_BLOCK' | 'UNSUPPORTED_INLINE';
   message: string;
-  /** 原文字符偏移（含） */
+  /**
+   * 原文字符偏移（含）。
+   *
+   * ⚠️ 基准是**调用方传给 `fromMd` 的那份 markdown**（原文），**不是**归一化之后的文本
+   * （`docs/13` M26）。归一化会增删字符（BOM、CRLF、行尾空白、给标题补空行），
+   * 所以"归一化后的下标"拿去切原文必然错位 —— 摘录会串到相邻行。
+   * `fromMd` 内部靠 `normalizeToLines` 带回原文起点，才让这个约定成立。
+   *
+   * `from === to` 表示**没有原文位置**：`toMd` 侧的告警来自编辑器文档，不是从原文里找到的。
+   */
   from: number;
-  /** 原文字符偏移（不含） */
+  /** 原文字符偏移（不含）。同上 */
   to: number;
 }
 

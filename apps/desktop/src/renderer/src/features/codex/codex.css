@@ -1,0 +1,240 @@
+/* ---------------------------------------------------------------------------
+   设定面板（docs/15 B3）
+
+   只用 `global.css` 的主题变量，不新增色板 —— 与 `ai-panel.css` / `settings/ai.css`
+   同一条约束。不用 `--radius-sm`（既有未定义变量，见 ai-panel.css 的注释）。
+--------------------------------------------------------------------------- */
+
+/* 侧栏 tab 条（章节 / 设定，B4 会加大纲）。挂在 `.work-sidebar.sidebar-host` 里，
+   它 padding 已归 0，tab 条自己补内边距。 */
+.sidebar-tabs {
+  flex: none;
+  display: flex;
+  gap: 4px;
+  padding: 8px 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.sidebar-tab {
+  padding: 5px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--muted, var(--fg));
+  cursor: pointer;
+  font-size: 0.9em;
+}
+
+.sidebar-tab.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+}
+
+/* 两个 tab 内容常挂载，用 CSS 隐藏（不卸载，保章节列表滚动位置/选中态） */
+.sidebar-pane {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+.sidebar-pane.hidden {
+  display: none;
+}
+
+.codex-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 12px;
+  overflow-y: auto;
+}
+
+.codex-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.codex-title {
+  font-weight: 600;
+  flex: 1;
+}
+
+.codex-error {
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  color: var(--danger);
+  background: var(--surface);
+}
+
+.codex-saved {
+  color: var(--success, var(--accent));
+  font-size: 0.85em;
+}
+
+.codex-type-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.codex-type-button {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.codex-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-list-item {
+  width: 100%;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.codex-list-name {
+  font-weight: 500;
+}
+
+.codex-list-meta {
+  font-size: 0.85em;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+}
+
+.codex-empty {
+  padding: 12px 8px;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+  font-size: 0.9em;
+}
+
+.codex-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-field span {
+  font-size: 0.85em;
+  color: var(--muted, var(--fg));
+  opacity: 0.85;
+}
+
+.codex-field input,
+.codex-field textarea,
+.codex-field-key,
+.codex-field-value {
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--fg);
+}
+
+.codex-field textarea {
+  resize: vertical;
+  min-height: 48px;
+}
+
+.codex-body {
+  min-height: 120px;
+}
+
+.codex-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.codex-fields-title {
+  font-size: 0.85em;
+  color: var(--muted, var(--fg));
+  opacity: 0.85;
+}
+
+.codex-field-row {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.codex-field-key {
+  flex: 0 0 30%;
+}
+
+.codex-field-value {
+  flex: 1;
+}
+
+.codex-save {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--bg);
+  cursor: pointer;
+}
+
+.codex-save:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.danger {
+  color: var(--danger);
+}
+
+/* 起名器 */
+.name-gen {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.name-gen-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.name-gen-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.name-gen-item {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.name-gen-dup {
+  font-size: 0.8em;
+  color: var(--muted, var(--fg));
+  opacity: 0.7;
+}

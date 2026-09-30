@@ -57,7 +57,9 @@ def _put(
 # ---- 列表 ----
 
 
-def test_list_returns_seeded_first_chapter(client: TestClient, auth_headers: dict, work: dict) -> None:
+def test_list_returns_seeded_first_chapter(
+    client: TestClient, auth_headers: dict, work: dict
+) -> None:
     items = _list(client, auth_headers, work)
     assert len(items) == 1
     first = items[0]
@@ -249,6 +251,49 @@ def test_title_falls_back_when_first_line_is_not_a_heading(
     assert items[0]["title"] == "未命名"
 
 
+def test_read_refuses_non_utf8_chapter(
+    client: TestClient, auth_headers: dict, work: dict, work_root: Path
+) -> None:
+    """非 UTF-8 正文必须**拒绝打开**，而不是 ``errors="replace"`` 之后照常回存。
+
+    ``replace`` 会把解不出来的字节换成 U+FFFD，而保存时按 UTF-8 回写 —— 原稿字节被
+    **不可逆地**破坏。更隐蔽的是 read 返回的 hash 算的是**原始字节**，那份替换后的文本
+    回存时哈希对得上，冲突检测拦不住。所以这里要 400 + NOT_UTF8，让用户先转码。
+    """
+    chapter_dir = work_root / "manuscript" / "001-第一章"
+    # 「第」的 GBK 字节是 \xb5\xda，其中 \xb5 落在 UTF-8 的"续接字节"区间 ——
+    # 整段字节流不是合法 UTF-8（换成「章」就测不出来：\xd5\xc2 恰好能被 UTF-8 解成别的字）。
+    (chapter_dir / "chapter.md").write_bytes("# 第一章\n\n他推开门。\n".encode("gbk"))
+
+    chapter_id = _list(client, auth_headers, work)[0]["id"]
+    res = client.get(
+        CHAPTER.format(work_id=work["id"], chapter_id=chapter_id), headers=auth_headers
+    )
+
+    assert res.status_code == 400, res.text
+    assert res.json()["error"]["code"] == "NOT_UTF8"
+
+
+def test_read_tolerates_a_utf8_bom(
+    client: TestClient, auth_headers: dict, work: dict, work_root: Path
+) -> None:
+    """带 BOM 的 UTF-8 要能正常读。
+
+    Windows 记事本「另存为 UTF-8」默认加 BOM；而 BOM 不会被 ``str.strip()`` 去掉
+    （U+FEFF 的 ``isspace()`` 是 False），不处理的话首行标题匹配失败、章节显示成「未命名」。
+    """
+    chapter_dir = work_root / "manuscript" / "001-第一章"
+    (chapter_dir / "chapter.md").write_bytes("# 第一章 雪夜\n\n他推开门。\n".encode("utf-8-sig"))
+
+    chapter_id = _list(client, auth_headers, work)[0]["id"]
+    chapter = _read(client, auth_headers, work, chapter_id)
+
+    assert chapter["markdown"].startswith("# 第一章")
+    assert "\ufeff" not in chapter["markdown"]
+    # 列表路径也要一起去 BOM，否则标题会退回「未命名」
+    assert _list(client, auth_headers, work, refresh=True)[0]["title"] == "第一章 雪夜"
+
+
 # ---- 写入与乐观并发 ----
 
 
@@ -345,8 +390,10 @@ def test_second_write_with_stale_hash_is_refused(
     chapter_id = _list(client, auth_headers, work)[0]["id"]
     base = _read(client, auth_headers, work, chapter_id)["hash"]
 
-    assert _put(client, auth_headers, work, chapter_id, "# 第一章\n\n第一次\n", base).status_code == 200
-    assert _put(client, auth_headers, work, chapter_id, "# 第一章\n\n第二次\n", base).status_code == 409
+    ok = _put(client, auth_headers, work, chapter_id, "# 第一章\n\n第一次\n", base)
+    assert ok.status_code == 200
+    stale = _put(client, auth_headers, work, chapter_id, "# 第一章\n\n第二次\n", base)
+    assert stale.status_code == 409
 
 
 def test_write_with_fresh_hash_after_conflict_succeeds(
@@ -358,7 +405,8 @@ def test_write_with_fresh_hash_after_conflict_succeeds(
     _put(client, auth_headers, work, chapter_id, "# 第一章\n\n甲\n", base)
 
     fresh = _read(client, auth_headers, work, chapter_id)["hash"]
-    assert _put(client, auth_headers, work, chapter_id, "# 第一章\n\n乙\n", fresh).status_code == 200
+    again = _put(client, auth_headers, work, chapter_id, "# 第一章\n\n乙\n", fresh)
+    assert again.status_code == 200
 
 
 def test_write_persists_word_count_cache(
@@ -414,7 +462,9 @@ def test_forced_overwrite_backs_up_disk_version_first(
     md.write_text(external_body, encoding="utf-8")
 
     # 第一次：冲突，应用不许覆盖。
-    conflict = _put(client, auth_headers, work, chapter_id, "# 第一章\n\n（应用里的稿子）\n", stale_hash)
+    conflict = _put(
+        client, auth_headers, work, chapter_id, "# 第一章\n\n（应用里的稿子）\n", stale_hash
+    )
     assert conflict.status_code == 409
     disk_hash = conflict.json()["error"]["detail"]["diskHash"]
 
@@ -531,3 +581,28 @@ def test_unparseable_directory_is_ignored_not_fatal(
 
     items = _list(client, auth_headers, work)
     assert len(items) == 1
+
+
+def test_missing_word_count_cache_is_computed_and_written_back(
+    client: TestClient, auth_headers: dict, work: dict, work_root: Path
+) -> None:
+    """`docs/13` M31：meta.json 缺 `wordCountCache` 时必须**现场算**，不能当 0 用。
+
+    这条是 fixture 脚本"刻意不写这个字段"能成立的前提，也钉住了
+    `_read_title_and_wordcount` 的分支语义：`None` = "没有缓存，请重算"，
+    而不是"0 字"。反过来，**一旦写入就会被永久信任**（列表页只读首行）——
+    所以性能基线绝不能塞一个口径不同的近似值进去。
+    """
+    meta_path = work_root / "manuscript" / "001-第一章" / "meta.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    meta.pop("wordCountCache")
+    meta_path.write_text(json.dumps(meta, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    items = _list(client, auth_headers, work, refresh=True)
+    # 正文是 `# 第一章\n\n`：`#` 属 Po（标点，不计），"第一章"三个汉字才是字。
+    assert items[0]["wordCount"] == 3
+
+    restored = json.loads(meta_path.read_text(encoding="utf-8"))
+    assert restored["wordCountCache"] == 3
+
+

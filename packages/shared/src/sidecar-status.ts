@@ -20,11 +20,7 @@ export const SidecarState = {
 export type SidecarState = (typeof SidecarState)[keyof typeof SidecarState];
 
 export type SidecarFailureReason =
-  | 'handshake_timeout'
-  | 'spawn_error'
-  | 'unhealthy'
-  | 'exited'
-  | 'restart_exhausted';
+  'handshake_timeout' | 'spawn_error' | 'unhealthy' | 'exited' | 'restart_exhausted';
 
 export interface SidecarStatus {
   state: SidecarState;

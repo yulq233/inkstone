@@ -52,8 +52,14 @@ class RecentStore:
         items = raw.get("items") if isinstance(raw, dict) else None
         return items if isinstance(items, list) else []
 
-    def list(self) -> list[dict[str, Any]]:
-        """按 lastOpenedAt 倒序返回，附带现算的 ``exists``。"""
+    def list_entries(self) -> list[dict[str, Any]]:
+        """按 lastOpenedAt 倒序返回，附带现算的 ``exists``。
+
+        方法名**不能叫 `list`**：那会把内置 `list` 遮蔽掉，于是同类内
+        `_save(self, items: list[dict[str, Any]])` 的注解里，`list` 被解析成
+        这个方法而不是内置类型 —— mypy 报 `[valid-type]: Function ... is not valid as a type`，
+        而且只在 `--strict` 下才看得见。方法名遮蔽内置名是这种错误唯一的成因。
+        """
         result: list[dict[str, Any]] = []
         for entry in self._load():
             root_path = _root_of(entry)

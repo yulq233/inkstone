@@ -6,6 +6,10 @@ out/
 dist/
 release/
 *.tsbuildinfo
+# PyInstaller 产物（几十 MB，由 pnpm build:sidecar 生成，不进仓库；
+# icon.ico 与 icon-source.png 是源资产，要进仓库）
+apps/desktop/resources/sidecar/
+.build/
 
 # python
 __pycache__/
@@ -16,10 +20,16 @@ __pycache__/
 .mypy_cache/
 *.egg-info/
 services/sidecar/build/
+# pytest 临时根目录 + 每轮唯一的 basetemp（由 scripts/run-sidecar-tests.mjs 生成，
+# 避免会话清理撞上沙箱的批量删除保护 —— 见该文件注释）
+.pytmp/
 
 # app runtime data
 logs/
 *.log
+
+# 本地诊断输出（命令 stdout 重定向到这里的 txt，用 Read 读回）
+.logs/
 
 # env & local
 .env

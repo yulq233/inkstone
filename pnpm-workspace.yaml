@@ -30,7 +30,31 @@ nodeLinker: hoisted
 #   esbuild  —— 靠 postinstall 生成平台可执行文件
 allowBuilds:
   electron: true
+  # electron-builder 的传递依赖（NSIS 安装器差分更新用）。electron-builder 装上后
+  # pnpm 12 会要求显式放行，否则 install 以 ERR_PNPM_IGNORED_BUILDS 失败。
+  electron-winstaller: true
   esbuild: true
+
+# ---------------------------------------------------------------------------
+# ⚠️ TypeScript 并存安排（本步骤实测得出，改动前先读完）
+#
+# 仓库里同时存在**两个** TypeScript，这是刻意的：
+#
+#   根 node_modules/typescript        = 6.0.3   ← 供 typescript-eslint 使用
+#   apps/desktop、packages/* 各自那份 = 7.0.2   ← 供 tsc 使用（项目锁定版本）
+#
+# 为什么必须这样：typescript-eslint 8.70 **明确拒绝** TS 7（启动即抛
+# "typescript-eslint does not support TS 7.0."，exit 2 —— 报错很响，不是静默降级）。
+# 而 TypeScript 官方给了并存方案：让 lint 侧用 TS 6 的 API。
+#
+# 三个包的 `pnpm typecheck` 走各自 node_modules/.bin/tsc，解析到**自己那份 7.0.2**，
+# 所以项目编译版本没有被降级（已实测确认）。
+#
+# 因此**不要**在这里加 `peerDependencyRules.allowedVersions: typescript-eslint>typescript: 7`
+# —— 那会强制根系到 TS 7，lint 立刻整体不可用。
+# `peerDependencyRules` 必须写在本文件（pnpm 12 不再读 package.json 的 `pnpm` 字段），
+# 但当前用不上它：根 TS 6.0.3 本就落在 typescript-eslint 声明的 peer 区间内。
+# ---------------------------------------------------------------------------
 
 # pnpm 的供应链策略默认拒绝"刚发布不久"的版本；electron 需要显式豁免。
 minimumReleaseAgeExclude:
