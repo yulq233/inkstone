@@ -248,6 +248,15 @@ def test_parent_death_leaves_no_orphan(spawn) -> None:
     assert "孤儿进程防护" in proc.stderr_text
 
 
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason=(
+        "taskkill 是 Windows 专有命令，而这条验的**本来**就是 Windows 的进程树行为："
+        "venv 的 python.exe 是一层 redirector 包装进程，所以硬杀要同时杀两个 pid。"
+        "Linux 上那个前提不存在 —— ubuntu-latest 上会 FileNotFoundError（见 docs/17 T16）。"
+        "跳过是如实，不是掩盖。"
+    ),
+)
 def test_hardkill_by_announced_pid_terminates_everything(spawn) -> None:
     """复刻 `SidecarLauncher.hardKill()`：taskkill /PID <自报 pid> /T /F。
 

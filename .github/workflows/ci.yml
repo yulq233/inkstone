@@ -105,8 +105,16 @@ jobs:
       - name: mypy --strict
         run: .venv/bin/python -m mypy src tests
 
-      # ⚠️ 已知待观察项：`tests/test_handshake.py` 会真的 spawn 子进程，而
-      # Windows 上的 `taskkill /T /F` 分支在 Linux 不走。首次 push 后要看这条是否绿；
-      # 若失败，按 docs/08 §7 的预案加 `-k "not handshake"` 并在文档里写明原因。
+      # ✅ 已确认答案（2026-10-08）：`tests/test_handshake.py` 会真的 spawn 子进程，其中
+      # `test_hardkill_by_announced_pid_terminates_everything` **无条件**调 Windows 专有的
+      # `taskkill` → ubuntu-latest 上必挂（前两次 push 的 Python job 正是挂在这里，
+      # 稳定复现、不是 flaky）。
+      #
+      # 修法**不是**在这里加 `-k "not handshake"`：那会把 `test_parent_death_leaves_no_orphan`、
+      # `test_shutdown_endpoint_exits_cleanly`、`test_token_never_appears_in_process_output`
+      # 这些**在 Linux 上应该跑**的用例一起跳过。正确做法是给那**一条**加
+      # `skipif(sys.platform != "win32")` —— 它验的本就是 Windows 的进程树行为
+      # （venv 的 python.exe 是 redirector 包装进程），Linux 上不存在这个前提。
+      # 见 `docs/17` T16。
       - name: pytest
         run: .venv/bin/python -m pytest
